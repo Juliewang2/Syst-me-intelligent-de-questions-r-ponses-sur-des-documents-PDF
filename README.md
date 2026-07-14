@@ -1,4 +1,4 @@
-# 📚 PDF Chat — AI-Powered RAG Application
+# 📚 PDF Chat - AI-Powered RAG Application
 
 **PDF Chat** is a production-ready, ChatGPT-style application that lets you upload PDF
 documents and have grounded, cited conversations with them using **Retrieval-Augmented
@@ -49,7 +49,7 @@ with a polished, responsive, dark-mode-ready web UI.
 3. Embeddings are stored in a local **FAISS** vector index.
 4. When you ask a question, the app **retrieves** the most relevant chunks, injects them
    into a **prompt template** alongside your **conversation history**, and asks an OpenAI
-   chat model to answer — **streaming** the response token-by-token, just like ChatGPT.
+   chat model to answer - **streaming** the response token-by-token, just like ChatGPT.
 5. Every answer includes **source citations** (document name + page number) so you can
    verify where the information came from.
 
@@ -64,14 +64,14 @@ applications powered by large language models (LLMs). Instead of writing raw API
 OpenAI (or any other model provider) by hand, LangChain gives you composable building
 blocks:
 
-- **Document loaders** — read files (PDFs, web pages, databases) into a standard
+- **Document loaders** - read files (PDFs, web pages, databases) into a standard
   `Document` object with `page_content` and `metadata`.
-- **Text splitters** — break long documents into smaller chunks suitable for embedding.
-- **Embeddings models** — wrappers around embedding APIs (OpenAI, HuggingFace, etc.).
-- **Vector stores** — a unified interface over FAISS, Chroma, Pinecone, and others.
-- **Retrievers** — an abstraction for "given a query, return relevant documents."
-- **Prompt templates** — reusable, parameterized prompts.
-- **Chains / LCEL (LangChain Expression Language)** — the `|` pipe operator lets you
+- **Text splitters** - break long documents into smaller chunks suitable for embedding.
+- **Embeddings models** - wrappers around embedding APIs (OpenAI, HuggingFace, etc.).
+- **Vector stores** - a unified interface over FAISS, Chroma, Pinecone, and others.
+- **Retrievers** - an abstraction for "given a query, return relevant documents."
+- **Prompt templates** - reusable, parameterized prompts.
+- **Chains / LCEL (LangChain Expression Language)** - the `|` pipe operator lets you
   compose retrievers, prompts, models, and parsers into a single runnable pipeline, e.g.:
 
   ```python
@@ -86,7 +86,7 @@ chains (see `services/rag_service.py`).
 
 ### What is RAG (Retrieval-Augmented Generation)?
 
-LLMs only "know" what was in their training data — they have no knowledge of your private
+LLMs only "know" what was in their training data - they have no knowledge of your private
 PDF. **RAG** solves this by:
 
 1. **Retrieving** the most relevant pieces of your document(s) for a given question
@@ -99,7 +99,7 @@ hallucination and enabling the model to answer questions about content it has ne
 during training. The full pipeline implemented here is:
 
 ```
-PDF Upload → Text Extraction → Chunking → Embeddings → FAISS → Retriever → LLM → Final Answer
+PDF Upload -> Text Extraction -> Chunking -> Embeddings -> FAISS -> Retriever -> LLM -> Final Answer
 ```
 
 ### Embeddings
@@ -117,13 +117,13 @@ LLMs and embedding models have finite context windows, and retrieval works bette
 focused, topically coherent passages rather than entire documents. **Chunking** splits
 extracted PDF text into overlapping windows (default: 1000 characters with 200 characters
 of overlap) using LangChain's `RecursiveCharacterTextSplitter`, which tries to split on
-paragraph boundaries first, then sentences, then words — so chunks stay semantically
+paragraph boundaries first, then sentences, then words - so chunks stay semantically
 coherent. See `services/chunking_service.py`.
 
 ### Vector Databases
 
 A **vector database** (or vector store) is a database optimized for storing embeddings
-and performing fast **similarity search** — "find the k vectors closest to this query
+and performing fast **similarity search** - "find the k vectors closest to this query
 vector." Unlike a traditional keyword search (which matches exact words), vector search
 matches *meaning*, so a question like "How much does it cost?" can retrieve a chunk that
 says "The subscription is priced at $49/month" even though no words overlap.
@@ -151,9 +151,9 @@ A **prompt template** is a reusable, parameterized prompt string with placeholde
 history as structured messages rather than a flat string. This project defines three
 templates in `services/prompt_templates.py`:
 
-- `RAG_PROMPT` — the main answer-generation prompt (system instructions + retrieved
+- `RAG_PROMPT` - the main answer-generation prompt (system instructions + retrieved
   context + chat history + question)
-- `CONDENSE_QUESTION_PROMPT` — rewrites a follow-up question ("What about page 3?") into
+- `CONDENSE_QUESTION_PROMPT` - rewrites a follow-up question ("What about page 3?") into
   a standalone question using the conversation history, before retrieval
 - A structured-output prompt used for AI-generated document summaries
 
@@ -166,7 +166,7 @@ in-memory-only object: every user and assistant message is saved to the `chat_me
 table, associated with a `Conversation` row. On each new question, the last N messages
 (configurable via `MAX_HISTORY_MESSAGES`) are loaded and converted into LangChain
 `HumanMessage` / `AIMessage` objects, which are fed into the prompt template's
-`chat_history` placeholder — giving the model full context of the conversation so far,
+`chat_history` placeholder - giving the model full context of the conversation so far,
 and surviving server restarts since it's stored in the database.
 
 ---
@@ -193,25 +193,25 @@ and surviving server restarts since it's stored in the database.
 PDF Upload
    │
    ▼
-Text Extraction   (services/pdf_loader.py — pypdf / PyPDF2 / LangChain PyPDFLoader)
+Text Extraction (services/pdf_loader.py - pypdf / PyPDF2 / LangChain PyPDFLoader)
    │
    ▼
-Chunking          (services/chunking_service.py — RecursiveCharacterTextSplitter)
+Chunking (services/chunking_service.py - RecursiveCharacterTextSplitter)
    │
    ▼
-Embeddings        (services/embedding_service.py — OpenAIEmbeddings)
+Embeddings (services/embedding_service.py - OpenAIEmbeddings)
    │
    ▼
-FAISS             (services/vector_store.py — persisted local index)
+FAISS (services/vector_store.py - persisted local index)
    │
    ▼
-Retriever         (services/retriever.py — BaseRetriever, top-k similarity search)
+Retriever (services/retriever.py - BaseRetriever, top-k similarity search)
    │
    ▼
-LLM               (services/rag_service.py — ChatOpenAI, streamed via LCEL)
+LLM (services/rag_service.py - ChatOpenAI, streamed via LCEL)
    │
    ▼
-Final Answer      (with source citations, saved to conversation history)
+Final Answer (with source citations, saved to conversation history)
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a deeper, layer-by-layer breakdown
@@ -229,42 +229,42 @@ pdf-chat/
 ├── requirements.txt
 ├── .env.example
 ├── pytest.ini
-├── main.py                     # FastAPI app entrypoint
-├── config.py                   # Pydantic Settings (env-driven config)
-├── database.py                 # SQLAlchemy engine/session
-├── models.py                   # ORM models: Document, Conversation, ChatMessage
-├── schemas.py                  # Pydantic v2 request/response schemas
+├── main.py # FastAPI app entrypoint
+├── config.py # Pydantic Settings (env-driven config)
+├── database.py # SQLAlchemy engine/session
+├── models.py # ORM models: Document, Conversation, ChatMessage
+├── schemas.py # Pydantic v2 request/response schemas
 ├── routers/
-│   ├── chat.py                 # /api/chat, /api/chat/stream, /api/conversations
-│   ├── upload.py                # /api/upload
-│   ├── documents.py             # /api/documents (list/get/delete/summary)
-│   └── health.py                 # /api/health
+│   ├── chat.py # /api/chat, /api/chat/stream, /api/conversations
+│   ├── upload.py # /api/upload
+│   ├── documents.py # /api/documents (list/get/delete/summary)
+│   └── health.py # /api/health
 ├── services/
-│   ├── pdf_loader.py             # PDF text extraction
-│   ├── chunking_service.py       # Text splitting
-│   ├── embedding_service.py      # OpenAI embeddings client
-│   ├── vector_store.py           # FAISS persistence & search
-│   ├── retriever.py              # LangChain BaseRetriever wrapper
-│   ├── rag_service.py            # LCEL RAG chain, streaming, structured output
-│   ├── conversation_memory.py    # DB-backed chat history
-│   └── prompt_templates.py       # ChatPromptTemplate definitions
+│   ├── pdf_loader.py # PDF text extraction
+│   ├── chunking_service.py # Text splitting
+│   ├── embedding_service.py # OpenAI embeddings client
+│   ├── vector_store.py # FAISS persistence & search
+│   ├── retriever.py # LangChain BaseRetriever wrapper
+│   ├── rag_service.py # LCEL RAG chain, streaming, structured output
+│   ├── conversation_memory.py # DB-backed chat history
+│   └── prompt_templates.py # ChatPromptTemplate definitions
 ├── templates/
-│   ├── index.html                # Landing page
-│   ├── chat.html                  # Chat UI
-│   └── upload.html                # Upload UI
+│   ├── index.html # Landing page
+│   ├── chat.html # Chat UI
+│   └── upload.html # Upload UI
 ├── static/
-│   ├── css/style.css              # Full design system (light + dark)
+│   ├── css/style.css # Full design system (light + dark)
 │   └── js/
-│       ├── chat.js                 # SSE streaming, markdown rendering, sidebar
-│       ├── upload.js               # Drag-and-drop upload + progress
-│       └── theme.js                # Dark mode toggle
+│       ├── chat.js # SSE streaming, markdown rendering, sidebar
+│       ├── upload.js # Drag-and-drop upload + progress
+│       └── theme.js # Dark mode toggle
 ├── tests/
 │   ├── test_health.py
 │   └── test_chunking.py
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   └── screenshots/
-└── data/                        # created at runtime (gitignored)
+└── data/ # created at runtime (gitignored)
     ├── uploads/
     ├── vector_store/
     └── pdf_chat.db
@@ -353,7 +353,7 @@ that call OpenAI will fail until it's set.
 
 ### 6. Initialize and Run
 
-The SQLite database and FAISS index are created automatically on first run — no manual
+The SQLite database and FAISS index are created automatically on first run - no manual
 migration step needed. Just start the server (see [Running the Application](#running-the-application)).
 
 ---
@@ -366,7 +366,7 @@ experience:
 1. **Install the Python extension**: open the Extensions panel (`Ctrl+Shift+X` /
    `Cmd+Shift+X`) and install `ms-python.python` (VS Code will also suggest it
    automatically via `.vscode/extensions.json`).
-2. **Open the folder**: `File → Open Folder…` and select the `pdf-chat` directory.
+2. **Open the folder**: `File -> Open Folder…` and select the `pdf-chat` directory.
 3. **Select the interpreter**: press `Ctrl+Shift+P` / `Cmd+Shift+P`, run
    `Python: Select Interpreter`, and choose the one inside `./venv`.
 4. **Run the server with the debugger**: open the "Run and Debug" panel (`Ctrl+Shift+D`)
@@ -422,11 +422,11 @@ python main.py
 FastAPI automatically generates OpenAPI documentation from the routers' type hints and
 docstrings:
 
-- **Swagger UI** (`/docs`) — an interactive playground where you can expand each
+- **Swagger UI** (`/docs`) - an interactive playground where you can expand each
   endpoint, fill in parameters, and execute real requests directly from the browser.
   Great for testing `/api/upload`, `/api/chat`, and `/api/documents/{id}/summary` without
   writing any client code.
-- **ReDoc** (`/redoc`) — a clean, read-only reference view of the same OpenAPI schema,
+- **ReDoc** (`/redoc`) - a clean, read-only reference view of the same OpenAPI schema,
   better suited for sharing with API consumers as documentation.
 
 Both are generated live from `schemas.py` and the route definitions in `routers/`, so
@@ -477,7 +477,7 @@ Once you've uploaded a PDF, try asking things like:
 
 ## Deployment Guide
 
-### Option A — Docker
+### Option A - Docker
 
 Create a `Dockerfile` (not included by default, since this repo targets local/VS Code
 development, but easy to add):
@@ -506,7 +506,7 @@ docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data pdf-chat
 Mounting `./data` as a volume ensures your SQLite database and FAISS index persist across
 container restarts.
 
-### Option B — A traditional VM / bare metal server
+### Option B - A traditional VM / bare metal server
 
 1. Provision a server (e.g. Ubuntu 22.04+), install Python 3.12+.
 2. Clone the repo, create a virtual environment, install `requirements.txt`.
@@ -523,7 +523,7 @@ container restarts.
 6. Use a process supervisor (systemd, supervisord) to keep the app running and restart it
    on failure.
 
-### Option C — Platform-as-a-Service (Render, Railway, Fly.io, etc.)
+### Option C - Platform-as-a-Service (Render, Railway, Fly.io, etc.)
 
 Most PaaS providers can build directly from `requirements.txt` and a start command:
 
@@ -534,7 +534,7 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 Set `OPENAI_API_KEY` (and any other `.env` values) as environment variables/secrets in
 the platform's dashboard rather than committing `.env`. For persistence, either attach a
 volume for `data/`, or swap SQLite/FAISS for managed services (Postgres + a hosted vector
-DB) for a fully stateless deployment — see `docs/ARCHITECTURE.md#extensibility-points`.
+DB) for a fully stateless deployment - see `docs/ARCHITECTURE.md#extensibility-points`.
 
 ### Production checklist
 
@@ -561,7 +561,7 @@ prompt) and re-run `pip install -r requirements.txt`.
 **PDF upload succeeds but status is `failed`**
 Check the `error_message` field on the document (visible in the sidebar tooltip / via
 `GET /api/documents/{id}`). Common causes:
-- The PDF is a scanned image with no text layer (OCR is not included in this project —
+- The PDF is a scanned image with no text layer (OCR is not included in this project -
   see [Future Improvements](#future-improvements)).
 - The PDF is corrupted or password-protected.
 
@@ -570,7 +570,7 @@ Verify your API key is correct and has available quota/billing set up on your Op
 account.
 
 **Chat answers say "the context does not contain enough information"**
-This is expected, grounded behavior — the model is instructed not to answer from outside
+This is expected, grounded behavior - the model is instructed not to answer from outside
 knowledge. Make sure you've selected the right document scope (or "All documents") in the
 chat sidebar, and that the document actually contains the information you're asking
 about.
@@ -585,7 +585,7 @@ Run on a different port: `uvicorn main:app --reload --port 8001`.
 
 **`sqlite3.OperationalError: database is locked`**
 This can happen under heavy concurrent write load with SQLite. For production traffic,
-switch `DATABASE_URL` to a Postgres connection string — SQLAlchemy handles the rest.
+switch `DATABASE_URL` to a Postgres connection string - SQLAlchemy handles the rest.
 
 **Vector search returns irrelevant results**
 Try lowering `CHUNK_SIZE` for more granular chunks, or increasing `RETRIEVER_K` to widen
