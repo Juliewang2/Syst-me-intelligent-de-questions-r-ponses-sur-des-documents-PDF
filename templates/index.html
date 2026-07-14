@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }} — Chat with your PDFs</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <script src="/static/js/theme.js"></script>
+
+  <div class="landing">
+    <nav class="landing-nav">
+      <div class="brand">
+        <div class="sidebar-header logo" style="width:32px;height:32px;">AI</div>
+        {{ app_name }}
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button class="theme-toggle" data-theme-toggle>
+          <span data-theme-icon></span>
+          <span data-theme-label></span>
+        </button>
+        <a href="/chat" class="btn btn-primary btn-sm">Open Chat</a>
+      </div>
+    </nav>
+
+    <section class="landing-hero">
+      <span class="badge">&#9889; Powered by LangChain + FAISS + OpenAI</span>
+      <h1>Chat with your PDFs like ChatGPT, grounded in your own documents</h1>
+      <p>
+        Upload contracts, research papers, manuals, or reports, and get accurate,
+        cited answers in seconds — powered by Retrieval-Augmented Generation (RAG),
+        streaming responses, and full conversation memory.
+      </p>
+      <div class="cta-group">
+        <a href="/upload" class="btn btn-primary">Upload a PDF</a>
+        <a href="/chat" class="btn btn-secondary">Start Chatting</a>
+        <a href="/docs" class="btn btn-secondary">API Docs</a>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">&#128196;</div>
+          <h3>Multi-PDF Support</h3>
+          <p>Upload and manage multiple documents, and search across all of them or scope to one.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#129504;</div>
+          <h3>Retrieval-Augmented Generation</h3>
+          <p>Answers are grounded in your documents via semantic search over chunked embeddings.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#9889;</div>
+          <h3>Streaming Answers</h3>
+          <p>Responses stream token-by-token over Server-Sent Events, just like ChatGPT.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#128172;</div>
+          <h3>Conversation Memory</h3>
+          <p>Follow-up questions are automatically understood in the context of your chat history.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#128220;</div>
+          <h3>Source Citations</h3>
+          <p>Every answer links back to the exact document and page it was drawn from.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#127765;</div>
+          <h3>Dark Mode &amp; Responsive</h3>
+          <p>A polished, distraction-free interface that looks great on any device.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

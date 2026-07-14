@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upload — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <script src="/static/js/theme.js"></script>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">AI</div>
+        <h1>{{ app_name }}</h1>
+      </div>
+
+      <div class="sidebar-nav">
+        <a href="/chat" class="nav-link">&#128172; Chat</a>
+        <a href="/upload" class="nav-link active">&#11014;&#65039; Upload</a>
+        <a href="/docs" class="nav-link">&#128220; API Docs</a>
+      </div>
+
+      <div class="sidebar-section-title">Your Documents</div>
+      <div class="document-list" id="document-list">
+        <div style="padding: 10px; color: var(--color-text-muted); font-size: 13px;">Loading&hellip;</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="theme-toggle" data-theme-toggle>
+          <span data-theme-icon></span>
+          <span data-theme-label></span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div class="topbar-title">
+          <button class="mobile-menu-btn" id="mobile-menu-btn">&#9776;</button>
+          Upload Documents
+        </div>
+      </div>
+
+      <div class="upload-page">
+        <h2>Upload PDF documents</h2>
+        <p class="subtitle">
+          Drop one or more PDF files below. Each document is text-extracted, chunked, embedded,
+          and indexed into the FAISS vector store — ready to chat with in seconds.
+        </p>
+
+        <div class="dropzone" id="dropzone">
+          <div class="icon">&#11014;&#65039;</div>
+          <h3>Drag &amp; drop PDF files here</h3>
+          <p>or <button id="browse-btn" class="btn btn-secondary btn-sm" style="margin-top:10px;">browse files</button></p>
+          <input type="file" id="file-input" accept="application/pdf" multiple />
+        </div>
+
+        <div class="upload-queue" id="upload-queue"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/upload.js"></script>
+  <script src="/static/js/chat.js"></script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:,">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+</head>
+<body>
+  <script src="/static/js/theme.js"></script>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">AI</div>
+        <h1>{{ app_name }}</h1>
+      </div>
+
+      <div class="sidebar-nav">
+        <a href="/chat" class="nav-link active">&#128172; Chat</a>
+        <a href="/upload" class="nav-link">&#11014;&#65039; Upload</a>
+        <a href="/docs" class="nav-link">&#128220; API Docs</a>
+      </div>
+
+      <div style="padding: 12px 12px 0;">
+        <button class="btn btn-primary btn-block" id="new-chat-btn">+ New Chat</button>
+      </div>
+
+      <div class="sidebar-section-title">Conversations</div>
+      <div class="conversation-list" id="conversation-list" style="flex: 0 1 40%;">
+        <div style="padding: 10px; color: var(--color-text-muted); font-size: 13px;">Loading&hellip;</div>
+      </div>
+
+      <div class="sidebar-section-title">Your Documents</div>
+      <div class="document-list" id="document-list">
+        <div style="padding: 10px; color: var(--color-text-muted); font-size: 13px;">Loading&hellip;</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="theme-toggle" data-theme-toggle>
+          <span data-theme-icon></span>
+          <span data-theme-label></span>
+        </button>
+        <a href="/upload" class="icon-btn">+ Upload</a>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div class="topbar-title">
+          <button class="mobile-menu-btn" id="mobile-menu-btn">&#9776;</button>
+          PDF Chat
+          <span class="topbar-sub">Retrieval-Augmented Generation</span>
+        </div>
+      </div>
+
+      <div class="chat-container">
+        <div class="chat-scroll" id="chat-scroll">
+          <div class="chat-inner">
+            <div class="empty-state" id="empty-state">
+              <div class="icon">&#128172;</div>
+              <h3>Ask anything about your documents</h3>
+              <p>Upload a PDF and start a conversation. Answers are grounded in your document's content, with citations.</p>
+              <div class="suggested-questions">
+                <div class="suggested-chip">Summarize this document in 3 bullet points</div>
+                <div class="suggested-chip">What are the key takeaways?</div>
+                <div class="suggested-chip">Are there any dates or deadlines mentioned?</div>
+                <div class="suggested-chip">Explain this document like I'm five</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-input-area">
+          <div class="chat-input-inner">
+            <div class="scope-indicator">
+              <span>Scope:</span>
+              <select id="scope-select">
+                <option value="">All documents</option>
+              </select>
+            </div>
+            <form id="chat-form">
+              <div class="input-row">
+                <textarea
+                  id="chat-input"
+                  rows="1"
+                  placeholder="Ask a question about your document(s)... (Enter to send, Shift+Enter for a new line)"
+                ></textarea>
+                <button type="submit" class="send-btn" id="send-btn" title="Send">&#10148;</button>
+              </div>
+            </form>
+            <div class="input-hint">PDF Chat can make mistakes. Verify important information against the source document.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/chat.js"></script>
+</body>
+</html>
