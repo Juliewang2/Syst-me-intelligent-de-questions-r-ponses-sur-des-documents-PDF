@@ -105,7 +105,7 @@ PDF Upload -> Text Extraction -> Chunking -> Embeddings -> FAISS -> Retriever ->
 ### Embeddings
 
 An **embedding** is a numerical vector (e.g. 1536 floating-point numbers for
-`text-embedding-3-small`) that represents the *meaning* of a piece of text. Texts with
+`text-embedding-3-small`) that represents the _meaning_ of a piece of text. Texts with
 similar meaning end up with vectors that are close together in that high-dimensional
 space (measured via cosine similarity or L2 distance). This project embeds every chunk of
 every uploaded PDF using OpenAI's embedding model (`services/embedding_service.py`), and
@@ -125,7 +125,7 @@ coherent. See `services/chunking_service.py`.
 A **vector database** (or vector store) is a database optimized for storing embeddings
 and performing fast **similarity search** - "find the k vectors closest to this query
 vector." Unlike a traditional keyword search (which matches exact words), vector search
-matches *meaning*, so a question like "How much does it cost?" can retrieve a chunk that
+matches _meaning_, so a question like "How much does it cost?" can retrieve a chunk that
 says "The subscription is priced at $49/month" even though no words overlap.
 
 ### FAISS
@@ -279,7 +279,7 @@ pdf-chat/
 This project requires **Python 3.12 or newer**.
 
 - **Windows**: Download from [python.org/downloads](https://www.python.org/downloads/)
-  and make sure to check *"Add Python to PATH"* during installation.
+  and make sure to check _"Add Python to PATH"_ during installation.
 - **macOS**: `brew install python@3.12` (requires [Homebrew](https://brew.sh/)), or
   download from python.org.
 - **Linux (Debian/Ubuntu)**: `sudo apt update && sudo apt install python3.12 python3.12-venv`
@@ -337,8 +337,8 @@ pip install -r requirements.txt
 Copy the example environment file:
 
 ```bash
-cp .env.example .env        # macOS/Linux
-copy .env.example .env      # Windows
+cp .env.example .env # macOS/Linux
+copy .env.example .env # Windows
 ```
 
 Open `.env` in your editor and set:
@@ -366,7 +366,7 @@ experience:
 1. **Install the Python extension**: open the Extensions panel (`Ctrl+Shift+X` /
    `Cmd+Shift+X`) and install `ms-python.python` (VS Code will also suggest it
    automatically via `.vscode/extensions.json`).
-2. **Open the folder**: `File -> Open Folder…` and select the `pdf-chat` directory.
+2. **Open the folder**: `File -> Open Folder...` and select the `pdf-chat` directory.
 3. **Select the interpreter**: press `Ctrl+Shift+P` / `Cmd+Shift+P`, run
    `Python: Select Interpreter`, and choose the one inside `./venv`.
 4. **Run the server with the debugger**: open the "Run and Debug" panel (`Ctrl+Shift+D`)
@@ -399,14 +399,14 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 
 Then open your browser to:
 
-| URL                             | Description                          |
-|----------------------------------|---------------------------------------|
-| http://127.0.0.1:8000            | Landing page                          |
-| http://127.0.0.1:8000/upload     | Upload PDF documents                  |
-| http://127.0.0.1:8000/chat       | Chat with your documents              |
-| http://127.0.0.1:8000/docs       | Swagger UI (interactive API docs)     |
-| http://127.0.0.1:8000/redoc      | ReDoc (reference-style API docs)      |
-| http://127.0.0.1:8000/api/health | Health check (JSON)                   |
+| URL                              | Description                       |
+| -------------------------------- | --------------------------------- |
+| http://127.0.0.1:8000            | Landing page                      |
+| http://127.0.0.1:8000/upload     | Upload PDF documents              |
+| http://127.0.0.1:8000/chat       | Chat with your documents          |
+| http://127.0.0.1:8000/docs       | Swagger UI (interactive API docs) |
+| http://127.0.0.1:8000/redoc      | ReDoc (reference-style API docs)  |
+| http://127.0.0.1:8000/api/health | Health check (JSON)               |
 
 You can also run it directly via Python (uses the `if __name__ == "__main__"` block in
 `main.py`):
@@ -438,14 +438,14 @@ they always stay in sync with the actual API.
 
 Once you've uploaded a PDF, try asking things like:
 
-- *"Summarize this document in 3 bullet points."*
-- *"What are the key takeaways from this document?"*
-- *"Are there any dates, deadlines, or dollar amounts mentioned?"*
-- *"Who are the main people or organizations mentioned in this document?"*
-- *"Explain the section about [topic] like I'm five."*
-- *"What does this document say about [specific term]?"*
-- Follow-ups work too, thanks to conversation memory: *"Can you go deeper on the second
-  point?"*
+- _"Summarize this document in 3 bullet points."_
+- _"What are the key takeaways from this document?"_
+- _"Are there any dates, deadlines, or dollar amounts mentioned?"_
+- _"Who are the main people or organizations mentioned in this document?"_
+- _"Explain the section about [topic] like I'm five."_
+- _"What does this document say about [specific term]?"_
+- Follow-ups work too, thanks to conversation memory: _"Can you go deeper on the second
+  point?"_
 
 ---
 
@@ -561,6 +561,7 @@ prompt) and re-run `pip install -r requirements.txt`.
 **PDF upload succeeds but status is `failed`**
 Check the `error_message` field on the document (visible in the sidebar tooltip / via
 `GET /api/documents/{id}`). Common causes:
+
 - The PDF is a scanned image with no text layer (OCR is not included in this project -
   see [Future Improvements](#future-improvements)).
 - The PDF is corrupted or password-protected.
