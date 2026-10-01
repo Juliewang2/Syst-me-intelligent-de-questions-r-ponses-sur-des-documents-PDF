@@ -35,7 +35,10 @@ trap pause_on_exit EXIT
 # ---------------------------------------------------------------
 echo "[STEP 1/6] Checking for Python..."
 PYTHON_BIN=""
-if command -v python3 >/dev/null 2>&1; then
+# The pinned dependencies need Python 3.12; prefer it when installed.
+if command -v python3.12 >/dev/null 2>&1; then
+    PYTHON_BIN="python3.12"
+elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="python3"
 elif command -v python >/dev/null 2>&1; then
     PYTHON_BIN="python"

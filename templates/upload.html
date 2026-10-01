@@ -28,6 +28,12 @@
         <div style="padding: 10px; color: var(--color-text-muted); font-size: 13px;">Loading&hellip;</div>
       </div>
 
+      <div class="user-box">
+        <div class="user-avatar">{{ user.username[0] | upper }}</div>
+        <div class="user-name" title="Signed in as {{ user.username }}">{{ user.username }}</div>
+        <button type="button" class="icon-btn" id="logout-btn">Log out</button>
+      </div>
+
       <div class="sidebar-footer">
         <button class="theme-toggle" data-theme-toggle>
           <span data-theme-icon></span>

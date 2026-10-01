@@ -91,6 +91,10 @@
     });
 
     xhr.onload = () => {
+      if (xhr.status === 401) {
+        window.PDFChatAuth?.redirectToLogin();
+        return;
+      }
       try {
         const response = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300) {

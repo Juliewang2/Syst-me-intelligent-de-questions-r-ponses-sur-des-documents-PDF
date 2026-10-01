@@ -21,11 +21,12 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from database import get_db
-from models import Document
+from models import Document, User
 from schemas import DocumentListResponse, DocumentResponse
+from services.auth_service import get_current_user
 from services.chunking_service import chunk_document
 from services.pdf_loader import PDFExtractionError, extract_pdf_text, validate_pdf_header
-from services.vector_store import add_document_chunks, delete_document as delete_from_vector_store
+from services.vector_store import add_document_chunks
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["Upload"])
@@ -64,7 +65,7 @@ def _save_upload_to_disk(file: UploadFile, document_id: str) -> Path:
     return destination
 
 
-def _process_single_pdf(file: UploadFile, db: Session) -> Document:
+def _process_single_pdf(file: UploadFile, db: Session, user: User) -> Document:
     _validate_upload(file)
 
     document_id = str(uuid.uuid4())
@@ -79,6 +80,7 @@ def _process_single_pdf(file: UploadFile, db: Session) -> Document:
 
     document = Document(
         id=document_id,
+        owner_id=user.id,
         filename=stored_path.name,
         original_filename=file.filename,
         file_path=str(stored_path),
@@ -99,7 +101,10 @@ def _process_single_pdf(file: UploadFile, db: Session) -> Document:
                 "contain only images without a text layer."
             )
 
-        add_document_chunks(chunks)
+        add_document_chunks(user.id, chunks)
+
+        if extracted.ocr_page_count:
+            logger.info("%s: %d page(s) read with OCR", file.filename, extracted.ocr_page_count)
 
         document.page_count = extracted.page_count
         document.chunk_count = len(chunks)
@@ -129,14 +134,16 @@ def _process_single_pdf(file: UploadFile, db: Session) -> Document:
 def upload_pdfs(
     files: List[UploadFile] = File(..., description="One or more PDF files to ingest"),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> DocumentListResponse:
     """
     Upload one or more PDF files. Each file is:
       1. Validated (extension, magic bytes, size limit)
       2. Saved to disk under `data/uploads/`
-      3. Text-extracted (pypdf / PyPDF2, via LangChain's PyPDFLoader)
+      3. Text-extracted (pypdf / PyPDF2, via LangChain's PyPDFLoader),
+         with OCR for scanned pages that have no text layer
       4. Chunked (RecursiveCharacterTextSplitter)
-      5. Embedded and stored in the shared FAISS vector store
+      5. Embedded and stored in the user's own FAISS vector store
       6. Recorded in the database with a `ready` or `failed` status
     """
     if not files:
@@ -145,7 +152,7 @@ def upload_pdfs(
     results: List[Document] = []
     for file in files:
         try:
-            document = _process_single_pdf(file, db)
+            document = _process_single_pdf(file, db, user)
             results.append(document)
         except HTTPException:
             raise

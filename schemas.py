@@ -14,6 +14,33 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=8, max_length=128)
+    invite_code: Optional[str] = Field(default=None, max_length=128)
+
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    created_at: Optional[datetime] = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+# ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
 
@@ -60,6 +87,7 @@ class SourceChunk(BaseModel):
     document_id: str
     document_name: str
     page: Optional[int] = None
+    page_end: Optional[int] = Field(default=None, description="Last page the chunk spans")
     chunk_index: Optional[int] = None
     text_snippet: str
 

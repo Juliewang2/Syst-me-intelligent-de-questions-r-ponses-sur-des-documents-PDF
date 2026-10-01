@@ -19,18 +19,31 @@ REM ---------------------------------------------------------------
 REM 1. Verify Python is installed
 REM ---------------------------------------------------------------
 echo [STEP 1/6] Checking for Python...
-where python >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Python was not found on your system, or it is not on PATH.
-    echo         Please install Python from https://www.python.org/downloads/
-    echo         and make sure to check "Add python.exe to PATH" during setup.
-    echo.
-    pause
-    exit /b 1
+REM The pinned dependencies (numpy, faiss, onnxruntime) need Python 3.12;
+REM prefer it via the "py" launcher even if a newer Python is the default.
+set "PYTHON_CMD=python"
+py -3.12 --version >nul 2>nul
+if not errorlevel 1 (
+    set "PYTHON_CMD=py -3.12"
+) else (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Python was not found on your system, or it is not on PATH.
+        echo         Please install Python 3.12 from https://www.python.org/downloads/
+        echo         and make sure to check "Add python.exe to PATH" during setup.
+        echo.
+        pause
+        exit /b 1
+    )
 )
-for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
-echo [OK] Found Python %PYVER%
+for /f "tokens=2" %%v in ('%PYTHON_CMD% --version 2^>^&1') do set PYVER=%%v
+echo [OK] Found Python %PYVER% ^(%PYTHON_CMD%^)
+echo %PYVER% | findstr /b "3.12." >nul
+if errorlevel 1 (
+    echo [WARN] This project is tested with Python 3.12. With %PYVER% some
+    echo        dependencies may fail to install. Install Python 3.12 if they do.
+)
 echo.
 
 REM ---------------------------------------------------------------
@@ -39,7 +52,7 @@ REM ---------------------------------------------------------------
 echo [STEP 2/6] Checking for virtual environment...
 if not exist "venv\Scripts\activate.bat" (
     echo [INFO] No virtual environment found. Creating one now...
-    python -m venv venv
+    %PYTHON_CMD% -m venv venv
     if errorlevel 1 (
         echo.
         echo [ERROR] Failed to create the virtual environment.

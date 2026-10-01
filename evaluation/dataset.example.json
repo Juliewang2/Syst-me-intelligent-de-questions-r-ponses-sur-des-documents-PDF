@@ -1,0 +1,55 @@
+[
+  {
+    "question": "Into which two components is the error of an ERM algorithm decomposed?",
+    "reference_answer": "The approximation error (also called the bias), which reflects the quality of the prior knowledge / the minimal risk achievable in the hypothesis class, and the estimation error, which is due to overfitting and depends on the size or complexity of the class.",
+    "pages": [61, 64, 130]
+  },
+  {
+    "question": "What does the No-Free-Lunch theorem say?",
+    "reference_answer": "That there is no universal learner: no learner can succeed on all learning tasks; for every learner there is a task on which it fails even though another learner succeeds.",
+    "pages": [61]
+  },
+  {
+    "question": "How does the growth function behave once m is larger than the VC-dimension?",
+    "reference_answer": "By Sauer's lemma it grows only polynomially rather than exponentially in m; in particular for m > d + 1 it is at most (em/d)^d.",
+    "pages": [74]
+  },
+  {
+    "question": "Who proposed the lemma that bounds the growth function in terms of the VC-dimension?",
+    "reference_answer": "Sauer, Shelah, and Perles, independently.",
+    "pages": [74]
+  },
+  {
+    "question": "What two issues does boosting address?",
+    "reference_answer": "The bias-complexity tradeoff (it gives smooth control between approximation and estimation error) and the computational complexity of learning (it amplifies the accuracy of weak learners).",
+    "pages": [130]
+  },
+  {
+    "question": "Boosting 主要用来解决哪两个问题？",
+    "reference_answer": "偏差-复杂度权衡（在近似误差和估计误差之间平滑控制），以及学习的计算复杂度问题（把弱学习器的准确率放大）。",
+    "pages": [130]
+  },
+  {
+    "question": "Is finding the optimal k-means clustering computationally easy?",
+    "reference_answer": "No. Finding the optimal k-means solution is NP-hard, even NP-hard to approximate within some constant, so a simple iterative algorithm is used instead.",
+    "pages": [313]
+  },
+  {
+    "question": "Which real-world example is used to motivate center-based clustering objectives?",
+    "reference_answer": "The facility location problem, e.g. placing k fire stations in a city so as to minimize the average distance between a house and its closest fire station.",
+    "pages": [313]
+  },
+  {
+    "question": "What is the Bayes optimal predictor?",
+    "reference_answer": "The predictor that outputs 1 if P[y = 1 | x] >= 1/2 and 0 otherwise; no other classifier has lower error, but it cannot be used in practice because the distribution D is unknown.",
+    "pages": [46]
+  },
+  {
+    "question": "Who won the 2018 FIFA World Cup?",
+    "reference_answer": null
+  },
+  {
+    "question": "What learning rate was used to train GPT-4?",
+    "reference_answer": null
+  }
+]

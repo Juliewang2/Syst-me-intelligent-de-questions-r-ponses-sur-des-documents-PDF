@@ -19,7 +19,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Conversation
+from models import User
+from routers.documents import get_owned_document
 from schemas import (
     ChatMessageResponse,
     ChatRequest,
@@ -28,8 +29,11 @@ from schemas import (
     ConversationListResponse,
     ConversationResponse,
 )
+from services.auth_service import get_current_user
 from services.conversation_memory import (
+    ConversationNotFound,
     delete_conversation as delete_conversation_service,
+    get_conversation,
     get_or_create_conversation,
     list_conversations,
     load_chat_history,
@@ -39,6 +43,21 @@ from services.rag_service import generate_answer, generate_answer_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Chat"])
+
+
+def _start_turn(db: Session, user: User, payload: ChatRequest):
+    """Validate the request against the user's own data and return the
+    conversation to append to."""
+    if payload.document_id:
+        get_owned_document(db, user, payload.document_id)
+    try:
+        return get_or_create_conversation(
+            db, user.id, conversation_id=payload.conversation_id, document_id=payload.document_id
+        )
+    except ConversationNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found."
+        ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -51,9 +70,11 @@ router = APIRouter(prefix="/api", tags=["Chat"])
     summary="List conversations",
 )
 def get_conversations(
-    document_id: Optional[str] = None, db: Session = Depends(get_db)
+    document_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ConversationListResponse:
-    conversations = list_conversations(db, document_id=document_id)
+    conversations = list_conversations(db, user.id, document_id=document_id)
     return ConversationListResponse(
         conversations=[ConversationResponse.model_validate(c.to_dict()) for c in conversations],
         total=len(conversations),
@@ -67,10 +88,14 @@ def get_conversations(
     summary="Create a new conversation",
 )
 def create_conversation(
-    payload: ConversationCreateRequest, db: Session = Depends(get_db)
+    payload: ConversationCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ConversationResponse:
+    if payload.document_id:
+        get_owned_document(db, user, payload.document_id)
     conversation = get_or_create_conversation(
-        db, conversation_id=None, document_id=payload.document_id, title=payload.title
+        db, user.id, conversation_id=None, document_id=payload.document_id, title=payload.title
     )
     return ConversationResponse.model_validate(conversation.to_dict())
 
@@ -81,9 +106,9 @@ def create_conversation(
     summary="Get all messages in a conversation",
 )
 def get_conversation_messages(
-    conversation_id: str, db: Session = Depends(get_db)
+    conversation_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> List[ChatMessageResponse]:
-    conversation = db.get(Conversation, conversation_id)
+    conversation = get_conversation(db, user.id, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
     return [ChatMessageResponse.model_validate(m.to_dict()) for m in conversation.messages]
@@ -93,8 +118,10 @@ def get_conversation_messages(
     "/conversations/{conversation_id}",
     summary="Delete a conversation and its messages",
 )
-def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> dict:
-    deleted = delete_conversation_service(db, conversation_id)
+def delete_conversation(
+    conversation_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    deleted = delete_conversation_service(db, user.id, conversation_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
     return {"deleted": True, "conversation_id": conversation_id}
@@ -105,17 +132,17 @@ def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> 
 # ---------------------------------------------------------------------------
 
 @router.post("/chat", response_model=ChatResponse, summary="Ask a question (non-streaming)")
-def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
-    conversation = get_or_create_conversation(
-        db, conversation_id=payload.conversation_id, document_id=payload.document_id
-    )
+def chat(
+    payload: ChatRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> ChatResponse:
+    conversation = _start_turn(db, user, payload)
 
     history = load_chat_history(db, conversation.id)
     save_message(db, conversation.id, role="user", content=payload.message)
 
     try:
         answer_text, sources = generate_answer(
-            payload.message, history, document_id=payload.document_id
+            payload.message, history, user.id, document_id=payload.document_id
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("RAG generation failed")
@@ -144,11 +171,12 @@ def _sse_event(data: dict) -> str:
 
 
 @router.post("/chat/stream", summary="Ask a question (streamed via Server-Sent Events)")
-async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
-    conversation = get_or_create_conversation(
-        db, conversation_id=payload.conversation_id, document_id=payload.document_id
-    )
+async def chat_stream(
+    payload: ChatRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> StreamingResponse:
+    conversation = _start_turn(db, user, payload)
     conversation_id = conversation.id
+    owner_id = user.id
 
     history = load_chat_history(db, conversation_id)
     save_message(db, conversation_id, role="user", content=payload.message)
@@ -160,7 +188,7 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> St
         final_sources: list = []
         try:
             async for event in generate_answer_stream(
-                payload.message, history, document_id=payload.document_id
+                payload.message, history, owner_id, document_id=payload.document_id
             ):
                 if event["type"] == "sources":
                     final_sources = event["sources"]
