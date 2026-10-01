@@ -10,7 +10,7 @@ and scripts.
 from contextlib import contextmanager
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from config import get_settings
@@ -44,6 +44,26 @@ def init_db() -> None:
     import models  # noqa: F401  imported for side effect: registers models on Base
 
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Minimal forward-only migration: `create_all` never alters existing
+    tables, so columns added to a model after a database was first
+    created (e.g. `owner_id`) are appended here with ALTER TABLE.
+    Pre-existing rows get NULL, which makes them invisible to every user."""
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name not in existing:
+                    col_type = column.type.compile(dialect=engine.dialect)
+                    conn.execute(
+                        text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}')
+                    )
 
 
 def get_db() -> Generator[Session, None, None]:

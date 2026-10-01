@@ -27,19 +27,35 @@ from models import ChatMessage, Conversation
 settings = get_settings()
 
 
+class ConversationNotFound(Exception):
+    """The conversation doesn't exist or belongs to another user."""
+
+
+def get_conversation(db: Session, owner_id: str, conversation_id: str) -> Optional[Conversation]:
+    """Fetch a conversation only if it belongs to `owner_id`."""
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None or conversation.owner_id != owner_id:
+        return None
+    return conversation
+
+
 def get_or_create_conversation(
     db: Session,
+    owner_id: str,
     conversation_id: Optional[str],
     document_id: Optional[str] = None,
     title: Optional[str] = None,
 ) -> Conversation:
-    """Fetch an existing conversation by id, or create a new one."""
+    """Fetch the owner's conversation by id, or create a new one when no
+    id is given. Raises ConversationNotFound for an unknown/foreign id."""
     if conversation_id:
-        conversation = db.get(Conversation, conversation_id)
-        if conversation is not None:
-            return conversation
+        conversation = get_conversation(db, owner_id, conversation_id)
+        if conversation is None:
+            raise ConversationNotFound(conversation_id)
+        return conversation
 
     conversation = Conversation(
+        owner_id=owner_id,
         document_id=document_id,
         title=title or "New Conversation",
     )
@@ -106,15 +122,17 @@ def save_message(
     return message
 
 
-def list_conversations(db: Session, document_id: Optional[str] = None) -> List[Conversation]:
-    query = db.query(Conversation)
+def list_conversations(
+    db: Session, owner_id: str, document_id: Optional[str] = None
+) -> List[Conversation]:
+    query = db.query(Conversation).filter(Conversation.owner_id == owner_id)
     if document_id:
         query = query.filter(Conversation.document_id == document_id)
     return query.order_by(Conversation.updated_at.desc()).all()
 
 
-def delete_conversation(db: Session, conversation_id: str) -> bool:
-    conversation = db.get(Conversation, conversation_id)
+def delete_conversation(db: Session, owner_id: str, conversation_id: str) -> bool:
+    conversation = get_conversation(db, owner_id, conversation_id)
     if conversation is None:
         return False
     db.delete(conversation)

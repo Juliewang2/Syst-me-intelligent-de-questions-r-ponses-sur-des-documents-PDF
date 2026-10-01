@@ -66,11 +66,22 @@
   // -------------------------------------------------------------------
   // API helpers
   // -------------------------------------------------------------------
+
+  // The session expired or was never there: go log in, then come back.
+  function redirectToLogin() {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+  }
+  window.PDFChatAuth = { redirectToLogin };
+
   async function fetchJSON(url, options = {}) {
     const res = await fetch(url, {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new Error("Session expired. Please log in again.");
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || `Request failed (${res.status})`);
@@ -271,7 +282,7 @@
       .map(
         (s) => `
         <div class="source-chip">
-          <div class="source-title"><span>${escapeHtml(s.document_name)}</span><span>p.${s.page ?? "?"}</span></div>
+          <div class="source-title"><span>${escapeHtml(s.document_name)}</span><span class="source-meta">${sourceMeta(s)}</span></div>
           <div class="source-snippet">${escapeHtml(s.text_snippet)}</div>
         </div>`
       )
@@ -284,6 +295,14 @@
     wrap.appendChild(toggle);
     wrap.appendChild(chips);
     return wrap;
+  }
+
+  // "p.3" or "p.3–4", plus the reranker's relevance score when present.
+  function sourceMeta(s) {
+    const start = s.page ?? "?";
+    const end = s.page_end ?? start;
+    const pages = end !== start ? `p.${start}&ndash;${end}` : `p.${start}`;
+    return s.rerank_score != null ? `${pages} &middot; relevance ${s.rerank_score}/10` : pages;
   }
 
   function appendTypingIndicator() {
@@ -364,6 +383,10 @@
         }),
       });
 
+      if (response.status === 401) {
+        redirectToLogin();
+        throw new Error("Session expired. Please log in again.");
+      }
       if (!response.ok || !response.body) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.detail || "Failed to reach the chat service.");
@@ -483,6 +506,14 @@
 
   if (newChatBtn) {
     newChatBtn.addEventListener("click", startNewConversation);
+  }
+
+  const logoutBtn = document.getElementById("logout-btn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      window.location.href = "/login";
+    });
   }
 
   const mobileMenuBtn = document.getElementById("mobile-menu-btn");

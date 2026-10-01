@@ -1,0 +1,266 @@
+[
+  {
+    "category": "term",
+    "question": "What does Theorem 6.7, the Fundamental Theorem of Statistical Learning, state?",
+    "reference_answer": "For a class of binary classifiers with the 0-1 loss, the following are equivalent: H has the uniform convergence property; any ERM rule is a successful agnostic PAC learner; H is agnostic PAC learnable; H is PAC learnable; any ERM rule is a successful PAC learner; H has a finite VC-dimension.",
+    "pages": [72],
+    "evidence": "Then, the following are equivalent: 1. H has the uniform convergence property."
+  },
+  {
+    "category": "term",
+    "question": "Who won the 2010 Turing Award, and for what contribution?",
+    "reference_answer": "Leslie Valiant, for introducing the PAC (Probably Approximately Correct) learning model.",
+    "pages": [50],
+    "evidence": "Valiant was named the winner of the 2010 Turing Award for the introduction of the PAC model."
+  },
+  {
+    "category": "term",
+    "question": "What is the VC dimension of nonhomogenous halfspaces in R^d?",
+    "reference_answer": "d + 1 (for homogenous halfspaces it is d).",
+    "pages": [122],
+    "evidence": "The VC dimension of the class of nonhomogenous halfspaces in Rd is d+1."
+  },
+  {
+    "category": "term",
+    "question": "In the Viola-Jones face recognition example, what image size is used and how many types of masks define the base features?",
+    "reference_answer": "Images of 24x24 pixels, and four mask types (A, B, C, D).",
+    "pages": [140],
+    "evidence": "the instance space is images, represented as matrices of gray level values of pixels"
+  },
+  {
+    "category": "term",
+    "question": "Which gain measures are used by the ID3/C4.5 algorithms and by CART?",
+    "reference_answer": "ID3 and C4.5 use the information gain (difference in label entropy before and after the split); CART uses the Gini index.",
+    "pages": [254],
+    "evidence": "used in the ID3 and C4.5 algorithms of Quinlan (1993) is the information gain"
+  },
+  {
+    "category": "term",
+    "question": "What are support vectors in hard-SVM?",
+    "reference_answer": "The training examples lying exactly at distance 1/||w0|| from the separating hyperplane (|<w0, xi>| = 1); the hard-SVM solution w0 is in the linear span of these examples.",
+    "pages": [210],
+    "evidence": "These vectors are therefore called support vectors."
+  },
+  {
+    "category": "term",
+    "question": "What does the Johnson-Lindenstrauss lemma show?",
+    "reference_answer": "That random projections (multiplying by a random matrix) reduce dimension without distorting Euclidean distances too much.",
+    "pages": [329],
+    "evidence": "showing that random projections do not distort Euclidean distances too much"
+  },
+  {
+    "category": "term",
+    "question": "What does the book mean by a deep network?",
+    "reference_answer": "A neural network with more than 2 layers.",
+    "pages": [281],
+    "evidence": "deep networks (i.e., networks of more than 2 layers) have shown very impressive practical performance"
+  },
+  {
+    "category": "concept",
+    "question": "How can a learner reach zero training error and still do badly on new data? Give the book's illustration.",
+    "reference_answer": "In the papaya example, a predictor that returns the stored label for training points and 0 everywhere else has zero empirical error, but its true error is 1/2. Fitting the training data too well like this is overfitting.",
+    "pages": [36],
+    "evidence": "We have found a predictor whose performance on the training set is excellent, yet its performance on the true world is very poor."
+  },
+  {
+    "category": "concept",
+    "question": "If my hypothesis class has a large approximation error, will collecting more training data fix the problem?",
+    "reference_answer": "No. The approximation error does not depend on the sample size, so more data (or a smaller class) won't help; one should enlarge the hypothesis class or change it completely.",
+    "pages": [151],
+    "evidence": "if the approximation error is large, it will not help us to enlarge the training set size"
+  },
+  {
+    "category": "concept",
+    "question": "How can I tell whether my model fails because it needs more data or because the hypothesis class is wrong?",
+    "reference_answer": "Plot learning curves: train on prefixes of the data of increasing size (10%, 20%, ...) and plot training error and validation error for each prefix; the shape of the curves distinguishes the scenarios.",
+    "pages": [153],
+    "evidence": "To produce a learning curve we train the algorithm on prefixes of the data of increasing sizes."
+  },
+  {
+    "category": "concept",
+    "question": "My dataset is small and I don't want to waste examples on a separate validation set. How can I still estimate the true error?",
+    "reference_answer": "Use k-fold cross validation: split the data into k folds, train on k-1 folds and measure the error on the remaining fold, repeat for each fold and average. With k = m it is called leave-one-out.",
+    "pages": [149, 150],
+    "evidence": "The k-fold cross validation technique is designed to give an accurate estimate of the true error without wasting too much data."
+  },
+  {
+    "category": "concept",
+    "question": "After using a validation set to choose a model, why is a separate third set of examples used?",
+    "reference_answer": "In the train-validation-test split, the test set is used only after the best model has been selected on the validation set, to estimate the true error of the chosen predictor.",
+    "pages": [150],
+    "evidence": "After we select the best model, we test the performance of the output predictor on the third set"
+  },
+  {
+    "category": "concept",
+    "question": "What requirements must a loss function meet to be used as a replacement for the 0-1 loss?",
+    "reference_answer": "A surrogate loss should be convex and should upper bound the original 0-1 loss; the hinge loss is an example.",
+    "pages": [167],
+    "evidence": "1. It should be convex. 2. It should upper bound the original loss."
+  },
+  {
+    "category": "concept",
+    "question": "Why is nearest neighbor usually run after reducing the dimension of the data?",
+    "reference_answer": "Because of the curse of dimensionality: the required sample size may increase exponentially with the dimension.",
+    "pages": [263, 264],
+    "evidence": "the required sample size might increase exponentially with the dimension"
+  },
+  {
+    "category": "concept",
+    "question": "Why does Naive Bayes need far fewer parameters than modelling P[Y|X] directly?",
+    "reference_answer": "Directly describing P[Y=y|X=x] over binary features needs 2^d parameters (exponential in d); Naive Bayes assumes the features are independent given the label, so the model factorizes into per-feature probabilities.",
+    "pages": [347],
+    "evidence": "the features are independent of each other"
+  },
+  {
+    "category": "cross",
+    "question": "How do the Batch Perceptron of Chapter 9 and the online Perceptron of Chapter 21 relate?",
+    "reference_answer": "Both learn homogenous halfspaces and update w <- w + y x on a misclassified example. The batch version loops over a training set until it is separated (at most (RB)^2 iterations when separable); the online version processes examples one at a time and updates on rounds where it makes a mistake, using the hinge loss as a surrogate.",
+    "pages": [120, 301, 302],
+    "evidence": "The Perceptron is a classic online learning algorithm for binary classification with the hypothesis class of homogenous halfspaces"
+  },
+  {
+    "category": "cross",
+    "question": "How do SRM and validation differ as approaches to model selection?",
+    "reference_answer": "SRM picks a hypothesis from a sequence of classes H1, H2, ... by minimizing a uniform-convergence bound (training error plus a complexity term). Validation trains candidate predictors and picks the one with the lowest error on a fresh validation set.",
+    "pages": [145, 146, 147],
+    "evidence": "Validation can be naturally used for model selection as follows."
+  },
+  {
+    "category": "cross",
+    "question": "How is Soft-SVM trained with SGD, and how does that carry over when kernels are used?",
+    "reference_answer": "Soft-SVM's objective (lambda/2 ||w||^2 plus average hinge loss) is solved with SGD. With kernels, the SGD iterate always lies in the span of the mapped training examples, so the algorithm keeps coefficients for them and needs only kernel evaluations.",
+    "pages": [212, 222, 223],
+    "evidence": "while only using kernel evaluations"
+  },
+  {
+    "category": "cross",
+    "question": "When is PCA the better choice and when is compressed sensing?",
+    "reference_answer": "PCA guarantees perfect recovery when the examples lie in an n-dimensional subspace; compressed sensing guarantees perfect recovery when the examples are sparse in some basis.",
+    "pages": [338],
+    "evidence": "Compressed sensing guarantees perfect recovery whenever the set of examples is sparse"
+  },
+  {
+    "category": "cross",
+    "question": "Compare the One-versus-All and All-Pairs reductions for multiclass prediction.",
+    "reference_answer": "One-versus-All trains k binary classifiers, each separating one class from the rest, and predicts the class with the highest score. All-Pairs trains a binary classifier for every pair of classes, using only examples of those two classes, and predicts the class that wins the most comparisons.",
+    "pages": [227, 228, 229],
+    "evidence": "Another popular reduction is the All-Pairs approach, in which all pairs of classes are compared to each other."
+  },
+  {
+    "category": "formula",
+    "question": "What is the closed-form solution of ridge regression?",
+    "reference_answer": "w = (2 lambda m I + A)^(-1) b, where A = sum_i x_i x_i^T and b = sum_i y_i x_i.",
+    "pages": [172],
+    "evidence": "Performing linear regression using Equation (13.3) is called ridge regression."
+  },
+  {
+    "category": "formula",
+    "question": "What sigmoid function is used in logistic regression?",
+    "reference_answer": "The logistic function sig(z) = 1 / (1 + exp(-z)).",
+    "pages": [126],
+    "evidence": "the sigmoid function used in logistic regression is the logistic function"
+  },
+  {
+    "category": "formula",
+    "question": "How many training examples guarantee that ERM over a finite hypothesis class succeeds in the realizable case?",
+    "reference_answer": "m >= log(|H| / delta) / epsilon examples suffice: then with probability at least 1 - delta every ERM hypothesis has true error at most epsilon (Corollary 2.3).",
+    "pages": [40, 41],
+    "evidence": "for which the realizability assumption holds"
+  },
+  {
+    "category": "formula",
+    "question": "How does AdaBoost compute the weight of each weak hypothesis?",
+    "reference_answer": "w_t = 1/2 * log(1/epsilon_t - 1), where epsilon_t is the weighted error of the weak hypothesis h_t on the current distribution.",
+    "pages": [135],
+    "evidence": "invoke weak learner"
+  },
+  {
+    "category": "formula",
+    "question": "How is the Gaussian kernel defined?",
+    "reference_answer": "K(x, x') = exp(-||x - x'||^2 / (2 sigma)); it is close to 1 for nearby instances and close to 0 for distant ones.",
+    "pages": [221],
+    "evidence": "Intuitively, the Gaussian kernel sets the inner product in the feature space"
+  },
+  {
+    "category": "chinese",
+    "question": "随机森林是如何构造的？它如何做出预测？",
+    "reference_answer": "随机森林由多棵决策树组成，每棵树在随机生成的训练数据上构建（例如有放回地抽样出新训练集，并随机选取特征子集）；预测时对各棵树的预测结果进行多数投票。",
+    "pages": [255],
+    "evidence": "The prediction of the random forest is obtained by a majority vote over the predictions of the individual trees."
+  },
+  {
+    "category": "chinese",
+    "question": "k 近邻（k-NN）算法如何对一个新样本进行分类？",
+    "reference_answer": "按距离度量找出离该样本最近的 k 个训练样本，返回它们标签中的多数标签。",
+    "pages": [258, 259],
+    "evidence": "return the majority label among"
+  },
+  {
+    "category": "chinese",
+    "question": "主成分分析（PCA）的优化目标是什么？",
+    "reference_answer": "找到压缩矩阵 W 和恢复矩阵 U，使原始向量与压缩后再恢复的向量之间的总平方距离最小。",
+    "pages": [324],
+    "evidence": "the total squared distance between the original and recovered vectors is minimal"
+  },
+  {
+    "category": "chinese",
+    "question": "EM 算法能保证找到似然函数的全局最大值吗？",
+    "reference_answer": "不能。EM（由 Dempster、Laird 和 Rubin 提出）是一种迭代过程，只能找到局部最大值，不保证找到全局最大值，但实践中通常效果不错。",
+    "pages": [349],
+    "evidence": "While EM is not guaranteed to find the global maximum, it often works reasonably well in practice."
+  },
+  {
+    "category": "chinese",
+    "question": "书中神经网络的权重是用什么方法训练的？梯度是怎么计算的？",
+    "reference_answer": "用随机梯度下降（SGD）作为启发式方法来调整权重，梯度由反向传播算法高效计算。",
+    "pages": [277, 279],
+    "evidence": "the backpropagation algorithm, which will be described in the sequel"
+  },
+  {
+    "category": "chinese",
+    "question": "非归一化谱聚类（Unnormalized Spectral Clustering）算法的步骤是什么？",
+    "reference_answer": "计算非归一化图拉普拉斯矩阵 L；取 L 最小的 k 个特征值对应的特征向量组成矩阵 U；把 U 的每一行当作一个点，用 k-means 聚类，得到最终的 k 个簇。",
+    "pages": [317],
+    "evidence": "Compute the unnormalized graph Laplacian L"
+  },
+  {
+    "category": "unanswerable",
+    "question": "What detection accuracy does the Viola-Jones face detector achieve in the book's experiments?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "How many trees does the book recommend using in a random forest?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "What learning rate does the book recommend for training neural networks with the Adam optimizer?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "How many layers does the convolutional network described in the book have?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "Which Python library does the book use to implement support vector machines?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "What is the time complexity of the k-means++ initialization?",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "书中用 MNIST 数据集训练的神经网络达到了多少准确率？",
+    "reference_answer": null
+  },
+  {
+    "category": "unanswerable",
+    "question": "书中介绍的 Transformer 模型的注意力机制是如何计算的？",
+    "reference_answer": null
+  }
+]

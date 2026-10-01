@@ -64,6 +64,30 @@ CONDENSE_QUESTION_PROMPT = ChatPromptTemplate.from_messages(
 
 
 # ---------------------------------------------------------------------------
+# Reranking prompt (the chat model scores retrieved candidates 0-10)
+# ---------------------------------------------------------------------------
+
+RERANK_SYSTEM_PROMPT = """You are a search relevance judge. You will be given a user's question \
+and numbered passages retrieved from their documents. Score EVERY passage for how useful it is \
+for answering the question:
+
+- 10: directly contains the answer
+- 7-9: contains most of the answer or key supporting facts
+- 4-6: related and partially useful
+- 1-3: same general topic but does not help answer
+- 0: unrelated
+
+Judge only the passage text. Return a score for every passage number."""
+
+RERANK_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", RERANK_SYSTEM_PROMPT),
+        ("human", "Question: {question}\n\nPassages:\n\n{passages}"),
+    ]
+)
+
+
+# ---------------------------------------------------------------------------
 # Structured-output document summary prompt (used with the OpenAI
 # Responses API's structured output / JSON schema feature)
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Document
+from models import Document, User
 from schemas import (
     DocumentListResponse,
     DocumentResponse,
@@ -23,6 +23,7 @@ from schemas import (
     DocumentSummaryResponse,
 )
 from services.pdf_loader import extract_pdf_text
+from services.auth_service import get_current_user
 from services.rag_service import generate_structured_summary
 from services.vector_store import delete_document as delete_from_vector_store
 
@@ -30,9 +31,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
 
+def get_owned_document(db: Session, user: User, document_id: str) -> Document:
+    """The user's document, or 404 (also for other users' documents, so
+    their ids can't even be probed)."""
+    document = db.get(Document, document_id)
+    if document is None or document.owner_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    return document
+
+
 @router.get("", response_model=DocumentListResponse, summary="List all uploaded documents")
-def list_documents(db: Session = Depends(get_db)) -> DocumentListResponse:
-    documents = db.query(Document).order_by(Document.created_at.desc()).all()
+def list_documents(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> DocumentListResponse:
+    documents = (
+        db.query(Document)
+        .filter(Document.owner_id == user.id)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
     return DocumentListResponse(
         documents=[DocumentResponse.model_validate(d.to_dict()) for d in documents],
         total=len(documents),
@@ -40,10 +57,10 @@ def list_documents(db: Session = Depends(get_db)) -> DocumentListResponse:
 
 
 @router.get("/{document_id}", response_model=DocumentResponse, summary="Get a single document")
-def get_document(document_id: str, db: Session = Depends(get_db)) -> DocumentResponse:
-    document = db.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+def get_document(
+    document_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> DocumentResponse:
+    document = get_owned_document(db, user, document_id)
     return DocumentResponse.model_validate(document.to_dict())
 
 
@@ -52,12 +69,12 @@ def get_document(document_id: str, db: Session = Depends(get_db)) -> DocumentRes
     status_code=status.HTTP_200_OK,
     summary="Delete a document and its vector index entries",
 )
-def delete_document(document_id: str, db: Session = Depends(get_db)) -> dict:
-    document = db.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+def delete_document(
+    document_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    document = get_owned_document(db, user, document_id)
 
-    removed_chunks = delete_from_vector_store(document_id)
+    removed_chunks = delete_from_vector_store(user.id, document_id)
 
     file_path = Path(document.file_path)
     if file_path.exists():
@@ -85,6 +102,7 @@ def summarize_document(
     document_id: str,
     payload: DocumentSummaryRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> DocumentSummaryResponse:
     """
     Demonstrates the raw OpenAI Responses API with structured output:
@@ -92,9 +110,7 @@ def summarize_document(
     (title, overview, key_points, document_type, estimated reading
     time), which we validate and cache on the document record.
     """
-    document = db.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    document = get_owned_document(db, user, document_id)
     if document.status != "ready":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
