@@ -1,6 +1,6 @@
-# 📚 PDF Chat：基于混合检索的 RAG 文档问答系统
+# 📚 PDF Chat: A RAG Document Q&A System with Hybrid Retrieval
 
-上传 PDF，像和 ChatGPT 聊天一样提问；回答**只依据文档内容**，并标注出自哪份文档的第几页。
+Upload PDFs and ask questions as if you were chatting with ChatGPT. Answers are based **only on the document content**, with citations showing the source document and page number.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
@@ -10,331 +10,333 @@
 ![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**评估结果（449 页教材 · 40 题测试集）：**相比纯向量检索基线，
-**hit@4 0.81 → 0.94**，**MRR 0.70 → 0.88**，**答案正确性 0.78 → 0.93**，**忠实度 0.96 → 1.00**。
-详见 [效果评估](#效果评估)。
+**Evaluation results (a 449-page textbook and a 40-question test set):** compared with the pure vector retrieval baseline, **hit@4 improved from 0.81 to 0.94**, **MRR from 0.70 to 0.88**, **answer correctness from 0.78 to 0.93**, and **faithfulness from 0.96 to 1.00**. See [Evaluation](#evaluation).
 
 ---
 
-## 目录
+## Table of Contents
 
-1. [一句话理解这个系统](#一句话理解这个系统)
-2. [功能](#功能)
-3. [两条核心流程](#两条核心流程)
-4. [在基础版上做的优化](#在基础版上做的优化)
-5. [效果评估](#效果评估)
-6. [技术栈](#技术栈)
-7. [项目结构](#项目结构)
-8. [快速开始](#快速开始)
-9. [配置项](#配置项)
+1. [The System in One Sentence](#the-system-in-one-sentence)
+2. [Features](#features)
+3. [The Two Core Pipelines](#the-two-core-pipelines)
+4. [Improvements over the Baseline](#improvements-over-the-baseline)
+5. [Evaluation](#evaluation)
+6. [Tech Stack](#tech-stack)
+7. [Project Structure](#project-structure)
+8. [Quick Start](#quick-start)
+9. [Configuration](#configuration)
 10. [API](#api)
-11. [测试](#测试)
-12. [已知局限与后续方向](#已知局限与后续方向)
+11. [Tests](#tests)
+12. [Known Limitations and Future Work](#known-limitations-and-future-work)
 
 ---
 
-## 一句话理解这个系统
+## The System in One Sentence
 
-大模型（LLM）像一位**博学但没读过你这份文件的教授**：直接问它"我这份合同第 5 条写了什么"，
-它不知道，还可能编一个答案。
+An LLM is like a **well-read professor who has never read your particular document**: if you ask it directly, "What does Article 5 of my contract say?", it does not know and may make up an answer.
 
-**RAG（检索增强生成）**的做法是：先派一个**"图书管理员"**到你的 PDF 里找出最相关的几段话，
-再把这几段话连同问题一起交给教授，让他**只根据这几段话回答**。
+**Retrieval-Augmented Generation (RAG)** first sends a **librarian** into your PDF to find the most relevant passages, then gives those passages and your question to the professor so that it can **answer only from the provided material**.
 
-本项目就是在实现"图书管理员 + 教授"这个流程，并把"图书管理员"做得更准：
-**向量检索懂意思，BM25 认关键词，重排模型再精挑细选。**
+This project implements that "librarian + professor" workflow and makes the librarian more accurate: **vector retrieval understands meaning, BM25 recognizes keywords, and a reranker model selects the best passages**.
 
 ---
 
-## 功能
+## Features
 
-- **多 PDF 上传与管理**：拖拽上传，支持在所有文档中提问，也可以只针对某一份文档提问
-- **扫描版 PDF**：没有文字层的页面自动 OCR（中英文）
-- **混合检索**：向量 + BM25，用 RRF 融合，再经 LLM 重排，并设有相关度门槛
-- **引用溯源**：每个回答都附来源（文档名、页码范围、相关度评分）
-- **流式输出**：SSE 逐字返回，体验同 ChatGPT
-- **多轮对话**：对话记录保存在 SQLite；追问会先被改写成完整问题再去检索
-- **账号体系**：注册 / 登录、JWT 鉴权，用户之间数据完全隔离
-- **结构化摘要**：OpenAI Responses API + JSON Schema，输出固定格式的文档摘要
-- **评估框架**：命中率 hit@k、MRR、忠实度、正确性、拒答准确率，并能按题型分析
-
----
-
-## 两条核心流程
-
-系统本质上只做两件事：**存文档**和**回答问题**。
-
-### 流程 A：上传 PDF（把书放进图书馆）
-
-```
-用户上传 PDF（需登录）
-  → ① 校验：扩展名、文件头、大小 ≤ 25MB                 routers/upload.py
-  → ② 保存到 data/uploads/
-  → ③ 逐页提取文字；文字少于 20 字符的页面走 OCR        services/pdf_loader.py
-       （pypdf → PyPDF2 依次兜底；OCR 用 pypdfium2 渲染 + RapidOCR 识别）
-  → ④ 跨页切块：整份文档拼接后切分，每块 1000 字符、    services/chunking_service.py
-       重叠 200 字符，记录起止页 page ~ page_end
-  → ⑤ 每块转成 1536 维向量                              services/embedding_service.py
-  → ⑥ 存入该用户独立的 FAISS 索引并落盘                 services/vector_store.py
-  → ⑦ SQLite 记录文档信息（归属用户、页数、块数、状态）  models.py
-```
-
-### 流程 B：提问（让教授答题）
-
-```
-用户输入问题
-  → ① 读取本次对话的历史记录                            services/conversation_memory.py
-  → ② 问题改写："那第三点呢？" → 完整的独立问题         rag_service._condense_question
-  → ③ 混合检索                                          services/retriever.py
-       ├─ 向量检索 top-12（余弦相似度 < 0.2 的丢弃）     services/vector_store.py
-       ├─ BM25 关键词检索 top-12（jieba 中文分词）       services/keyword_search.py
-       ├─ RRF 融合两路排名
-       └─ LLM 重排：逐段打 0–10 分，< 4 分的丢弃，取前 4  services/reranker.py
-  → ④ 拼接提示词：只能依据资料回答 + 资料 + 历史 + 问题  services/prompt_templates.py
-  → ⑤ gpt-4o-mini 生成回答，经 SSE 流式推送到浏览器      routers/chat.py
-  → ⑥ 问答连同引用来源一起存库，供后续追问使用
-```
-
-核心编排逻辑在 `services/rag_service.py`，检索管线在 `services/retriever.py`。
+- **Multiple PDF upload and management**: drag-and-drop upload; ask questions across all documents or target a specific document
+- **Scanned PDFs**: automatically runs OCR on pages without a text layer (Chinese and English)
+- **Hybrid retrieval**: combines vector retrieval and BM25 with RRF, then applies LLM reranking and relevance thresholds
+- **Source citations**: every answer includes the document name, page range, and relevance score
+- **Streaming output**: returns text progressively over SSE for a ChatGPT-like experience
+- **Multi-turn conversations**: conversation history is stored in SQLite; follow-up questions are rewritten into complete questions before retrieval
+- **Authentication**: registration, login, JWT authentication, and complete data isolation between users
+- **Structured summaries**: uses the OpenAI Responses API and JSON Schema to produce summaries in a fixed format
+- **Evaluation framework**: hit@k, MRR, faithfulness, correctness, refusal accuracy, and analysis by question type
 
 ---
 
-## 在基础版上做的优化
+## The Two Core Pipelines
 
-基础版是标准的"纯向量检索 RAG"。以下是发现的 7 个不足及对应改进：
+The system essentially does two things: **store documents** and **answer questions**.
 
-| # | 基础版的问题 | 改进方案 | 关键文件 |
+### Pipeline A: Upload a PDF (Putting a Book in the Library)
+
+```
+User uploads a PDF (login required)
+  → ① Validate: extension, file header, size ≤ 25 MB              routers/upload.py
+  → ② Save to data/uploads/
+  → ③ Extract text page by page; pages with fewer than 20 characters use OCR
+       (pypdf → PyPDF2 fallback; OCR uses pypdfium2 rendering + RapidOCR) services/pdf_loader.py
+  → ④ Create cross-page chunks: concatenate the document before splitting;
+       1,000 characters per chunk, 200-character overlap, with start/end pages
+                                                                    services/chunking_service.py
+  → ⑤ Convert each chunk into a 1,536-dimensional vector          services/embedding_service.py
+  → ⑥ Store and persist it in the user's isolated FAISS index     services/vector_store.py
+  → ⑦ Store document metadata in SQLite (user, pages, chunks, status)
+                                                                    models.py
+```
+
+### Pipeline B: Ask a Question (Having the Professor Answer)
+
+```
+User enters a question
+  → ① Read the current conversation history                   services/conversation_memory.py
+  → ② Rewrite the question: "What about the third point?" → an independent question
+                                                               rag_service._condense_question
+  → ③ Hybrid retrieval                                      services/retriever.py
+       ├─ Vector retrieval: top 12 (discard cosine similarity < 0.2)
+                                                               services/vector_store.py
+       ├─ BM25 keyword retrieval: top 12 (jieba Chinese tokenization)
+                                                               services/keyword_search.py
+       ├─ Fuse both rankings with RRF
+       └─ LLM reranking: score each passage from 0–10, discard < 4, keep the top 4
+                                                               services/reranker.py
+  → ④ Build a prompt: answer only from the material + material + history + question
+                                                               services/prompt_templates.py
+  → ⑤ gpt-4o-mini generates the answer and sends it to the browser over SSE
+                                                               routers/chat.py
+  → ⑥ Store the answer and citations for future follow-up questions
+```
+
+The main orchestration logic is in `services/rag_service.py`; the retrieval pipeline is in `services/retriever.py`.
+
+---
+
+## Improvements over the Baseline
+
+The baseline is a standard **pure vector retrieval RAG** system. The following seven shortcomings were identified and addressed:
+
+| # | Baseline problem | Improvement | Key files |
 |---|---|---|---|
-| 1 | **扫描版 PDF 读不出来**（没有 OCR） | 文字少于阈值的页面先渲染成图片，再用 RapidOCR 识别（ONNX，中英文，纯 pip 安装） | `pdf_loader.py` |
-| 2 | **只有向量检索**：搜型号、人名、术语等精确词效果差 | 向量 + BM25 混合检索，RRF 融合，再加 LLM 重排（结构化输出打分） | `retriever.py`、`keyword_search.py`、`reranker.py` |
-| 3 | **没有相关度门槛**：永远返回 4 段，哪怕全不相关 | 两道门槛：向量余弦相似度 ≥ 0.2，重排分数 ≥ 4/10；全部被过滤时明确告诉模型"没找到" | `retriever.py` |
-| 4 | **按文档过滤是"先搜后筛"**：只取 16 个结果再过滤，目标文档可能一段都筛不出来 | 每个用户一个独立索引；过滤时搜索整个索引（对暴力检索的 Flat 索引来说没有额外开销） | `vector_store.py` |
-| 5 | **按页切块**：跨页的句子会被切断 | 整份文档拼接后再切，用字符偏移量反推每块的起止页（引用显示为 p.3–4）；补充中文标点作为切分点 | `chunking_service.py` |
-| 6 | **没有登录鉴权**：任何人都能调用接口、消耗 API 费用 | 注册 / 登录；PBKDF2 加盐哈希存密码；JWT 存于 HttpOnly + SameSite Cookie；按用户隔离数据；可设邀请码；生产环境使用默认密钥时拒绝启动 | `auth_service.py`、`routers/auth.py` |
-| 7 | **没有效果评估** | 自建评估框架（参考 RAGAS 的指标设计）：hit@k、MRR、LLM 评委打分的忠实度 / 正确性 / 拒答准确率，按题型分析，并配有自动核对标注页码的脚本 | `evaluation/` |
+| 1 | **Scanned PDFs cannot be read** because there is no OCR | Render pages with fewer than the threshold number of characters as images, then recognize them with RapidOCR (ONNX, Chinese and English, installable with pip) | `pdf_loader.py` |
+| 2 | **Vector retrieval only** performs poorly for exact terms such as model numbers, names, and terminology | Combine vector retrieval and BM25, fuse them with RRF, and apply LLM reranking with structured scores | `retriever.py`, `keyword_search.py`, `reranker.py` |
+| 3 | **No relevance threshold**: always returns four passages, even when all are irrelevant | Apply two thresholds: cosine similarity ≥ 0.2 and reranking score ≥ 4/10; explicitly tell the model when everything is filtered out | `retriever.py` |
+| 4 | Document filtering was **"search first, filter later"**: only 16 results were retrieved before filtering, so the target document could produce no results | Maintain an isolated index for each user; search the entire index when filtering, with no additional cost for a flat index | `vector_store.py` |
+| 5 | **Page-based chunking** cuts sentences across page boundaries | Concatenate the document before chunking, infer each chunk's start/end page from character offsets, and add Chinese punctuation as split points | `chunking_service.py` |
+| 6 | **No authentication**: anyone could call the API and consume API credits | Add registration and login; store salted PBKDF2 password hashes; use HttpOnly + SameSite cookies for JWTs; isolate user data; support invite codes; reject the default secret in production | `auth_service.py`, `routers/auth.py` |
+| 7 | **No evaluation** | Build an evaluation framework inspired by RAGAS: hit@k, MRR, LLM-judged faithfulness/correctness/refusal accuracy, question-type analysis, and an automatic page-evidence verification script | `evaluation/` |
 
-**评估过程中额外发现并修复的问题：**
+**Additional issues discovered and fixed during evaluation:**
 
-- **中文路径导致向量库无法存盘**：FAISS 的 C++ 文件读写在 Windows 上打不开含中文的路径。改为先序列化成字节，再由 Python 写文件（写临时文件后原子替换）。
-- **BM25 在短文档上失效**：经典 Okapi IDF 对出现在一半以上段落里的词会算出 0 或负数，导致只有两三块的文档关键词检索完全失效。改用 Lucene / Elasticsearch 的 IDF 公式。
-- **OpenAI 请求没有超时**：一次请求卡死了 84 分钟。现在所有调用都有超时；重排超时 20 秒，且超时后自动退回到不重排的排序。
+- **Chinese paths prevented vector-store persistence**: FAISS C++ file I/O could not open paths containing Chinese characters on Windows. The index is now serialized to bytes first, then written by Python with an atomic temporary-file replacement.
+- **BM25 failed on short documents**: the classic Okapi IDF can be zero or negative for words appearing in more than half of the passages, making keyword retrieval fail completely for documents with only a few chunks. The Lucene/Elasticsearch IDF formula is used instead.
+- **OpenAI requests had no timeout**: one request became stuck for 84 minutes. All calls now have timeouts; reranking times out after 20 seconds and automatically falls back to the non-reranked ordering.
 
 ---
 
-## 效果评估
+## Evaluation
 
-### 实验设置
+### Experimental Setup
 
-| 项 | 内容 |
+| Item | Details |
 |---|---|
-| 文档 | *Understanding Machine Learning*（Shalev-Shwartz & Ben-David），449 页 → 1080 个块 |
-| 测试集 | **40 题**，6 种题型：术语 8、概念（换说法）8、跨章节 5、公式 5、中文问英文书 6、书中无答案（拒答）8 |
-| 标注 | 每题包含标准答案、答案所在页码和原文证据；`check_dataset.py` 自动核对证据确实出现在标注页上 |
-| 开发集 | 另有 11 题开发集用于调试，与测试集的知识点不重叠；测试集不用于调参 |
-| 模型 | gpt-4o-mini（生成 / 重排 / 评委）、text-embedding-3-small；每题取 k = 4 段 |
+| Document | *Understanding Machine Learning* (Shalev-Shwartz & Ben-David), 449 pages → 1,080 chunks |
+| Test set | **40 questions**, six types: terminology (8), paraphrased concepts (8), cross-chapter (5), formulas (5), Chinese questions about an English book (6), and unanswerable questions (8) |
+| Annotations | Each question includes a reference answer, answer pages, and source evidence; `check_dataset.py` verifies that the evidence appears on the annotated pages |
+| Development set | An additional 11-question development set for debugging, with no overlapping knowledge points; the test set was not used for tuning |
+| Models | gpt-4o-mini (generation, reranking, and judging), text-embedding-3-small; four passages per question |
 
-### 总体结果
+### Overall Results
 
-| 配置 | hit@4 | MRR | 忠实度 | 正确性 | 拒答准确率 | 检索耗时（中位数） |
+| Configuration | hit@4 | MRR | Faithfulness | Correctness | Refusal accuracy | Median retrieval time |
 |---|---|---|---|---|---|---|
-| 纯向量（基线） | 0.812 | 0.703 | 0.963 | 0.784 | 1.00 | 0.16 s |
-| 向量 + BM25 | 0.875 | 0.719 | 0.975 | 0.825 | 1.00 | 0.15 s |
-| **向量 + BM25 + 重排** | **0.938** | **0.880** | **1.000** | **0.928** | 1.00 | 1.51 s |
+| Pure vector (baseline) | 0.812 | 0.703 | 0.963 | 0.784 | 1.00 | 0.16 s |
+| Vector + BM25 | 0.875 | 0.719 | 0.975 | 0.825 | 1.00 | 0.15 s |
+| **Vector + BM25 + reranking** | **0.938** | **0.880** | **1.000** | **0.928** | 1.00 | 1.51 s |
 
-相对基线：hit@4 **+12.5 个百分点**（相对 +15%），MRR **+25%**，正确性 **+18%**。
+Compared with the baseline: hit@4 **+12.5 percentage points** (+15% relative), MRR **+25%**, and correctness **+18%**.
 
-### 按题型（hit@4 / 正确性）
+### By Question Type (hit@4 / correctness)
 
-| 题型 | 纯向量 | 向量 + BM25 | + 重排 |
+| Question type | Pure vector | Vector + BM25 | + Reranking |
 |---|---|---|---|
-| 术语（8） | 0.62 / 0.69 | **1.00** / 0.88 | 1.00 / **1.00** |
-| 概念（8） | 0.75 / 0.72 | 0.75 / 0.75 | **0.88 / 0.91** |
-| 公式（5） | 0.80 / 0.80 | 0.80 / 0.80 | 0.80 / **0.96** |
-| 中文（6） | 1.00 / 0.83 | 0.83 / 0.80 | 1.00 / 0.80 |
-| 跨章节（5） | 1.00 / 0.96 | 1.00 / 0.92 | 1.00 / 0.96 |
-| 拒答（8） | – / 1.00 | – / 1.00 | – / 1.00 |
+| Terminology (8) | 0.62 / 0.69 | **1.00** / 0.88 | 1.00 / **1.00** |
+| Concepts (8) | 0.75 / 0.72 | 0.75 / 0.75 | **0.88 / 0.91** |
+| Formulas (5) | 0.80 / 0.80 | 0.80 / 0.80 | 0.80 / **0.96** |
+| Chinese questions (6) | 1.00 / 0.83 | 0.83 / 0.80 | 1.00 / 0.80 |
+| Cross-chapter (5) | 1.00 / 0.96 | 1.00 / 0.92 | 1.00 / 0.96 |
+| Unanswerable (8) | – / 1.00 | – / 1.00 | – / 1.00 |
 
-### 结论
+### Conclusions
 
-- **BM25 在术语类问题上收益最大**（命中率 0.62 → 1.00）：专有名词正是向量检索的弱项。
-- **在换了说法的概念题上 BM25 没有帮助，重排才有帮助**（正确性 0.72 → 0.91）。
-- **用中文问英文文档时，BM25 反而引入噪音**（命中率 1.00 → 0.83），重排把它纠正了回来。
-- **检索质量提升后幻觉减少**：基线有两题，检索到的资料不足以回答（一题没检索到正确页面，另一题正确页面只排在第 4），模型就用自身知识补全了答案；加上重排后，相关段落被排到前面，忠实度达到 1.00。
-- **代价**：重排多一次 LLM 调用，检索耗时从 0.16 s 增加到 1.5 s。
+- **BM25 provides the largest gain on terminology questions** (hit rate 0.62 → 1.00), because proper nouns are a weakness of vector retrieval.
+- **BM25 does not help paraphrased concept questions; reranking does** (correctness 0.72 → 0.91).
+- **For Chinese questions about English documents, BM25 introduces noise** (hit rate 1.00 → 0.83), which reranking corrects.
+- **Better retrieval reduces hallucinations**: the baseline hallucinated on two questions because the retrieved material was insufficient; with reranking, the relevant passages moved to the top and faithfulness reached 1.00.
+- **Trade-off**: reranking adds another LLM call, increasing retrieval time from 0.16 s to 1.5 s.
 
-### 局限
+### Limitations
 
-- 40 题仍属小样本。命中率的提升来自 4 道题（纯向量未命中而重排命中），反方向为 0 道；方向一致，但单独看命中率还不具备统计显著性。MRR 和正确性的差距更大。
-- 正确性由 LLM 评委打分，存在误判（例如把"最大化方差"和"最小化重建误差"判为不同，实际上二者等价），整体分数偏低；但各配置受到的影响相同，横向比较仍然有效。
-- 表中的"纯向量"运行在改进后的切块策略之上，因此衡量的是检索方式本身的差异。
+- Forty questions is still a small sample. The hit-rate improvement came from four questions where pure vector retrieval missed and reranking succeeded, with no regressions. The direction is consistent, but the hit-rate difference alone is not statistically significant. MRR and correctness show larger gaps.
+- Correctness is scored by an LLM judge and can be misclassified. For example, it may treat "maximize variance" and "minimize reconstruction error" as different even though they are equivalent. The overall scores may therefore be low, but the effect is consistent across configurations, so comparisons remain useful.
+- The "pure vector" configuration uses the improved chunking strategy, so the comparison measures retrieval-method differences rather than the effect of chunking.
 
-### 复现
+### Reproduction
 
 ```bash
-# 1) 核对数据集标注（不调用 API）
-venv\Scripts\python.exe evaluation\check_dataset.py --pdf 教材.pdf --dataset evaluation\dataset_ml_book_test.json
-# 2) 运行评估（约 15 分钟，gpt-4o-mini 费用约 0.1 美元）
-venv\Scripts\python.exe evaluation\run_eval.py --pdf 教材.pdf --dataset evaluation\dataset_ml_book_test.json
-# 只评估检索（更省钱），或只跑部分配置
-venv\Scripts\python.exe evaluation\run_eval.py --pdf 教材.pdf --retrieval-only --configs vector,hybrid
+# 1) Verify dataset annotations (does not call the API)
+venv\Scripts\python.exe evaluation\check_dataset.py --pdf textbook.pdf --dataset evaluation\dataset_ml_book_test.json
+# 2) Run the evaluation (about 15 minutes; approximately $0.10 in gpt-4o-mini costs)
+venv\Scripts\python.exe evaluation\run_eval.py --pdf textbook.pdf --dataset evaluation\dataset_ml_book_test.json
+# Evaluate retrieval only (cheaper), or run selected configurations
+venv\Scripts\python.exe evaluation\run_eval.py --pdf textbook.pdf --retrieval-only --configs vector,hybrid
 ```
 
-评估使用独立的临时索引，结束后自动删除，不影响应用数据。详细结果保存在 `evaluation/results/`。
+Evaluation uses an independent temporary index that is deleted automatically, so application data is not affected. Detailed results are saved in `evaluation/results/`.
 
 ---
 
-## 技术栈
+## Tech Stack
 
-### 基础技术栈
+### Core Technologies
 
-| 类别 | 技术 |
+| Category | Technology |
 |---|---|
-| 语言 | Python 3.12 |
-| Web 后端 | FastAPI、Uvicorn、Jinja2；SSE 流式输出 |
-| LLM 编排 | LangChain 0.3（Document Loader、TextSplitter、VectorStore、Retriever、PromptTemplate、LCEL） |
-| 大模型 | OpenAI gpt-4o-mini、text-embedding-3-small；Responses API 结构化输出 |
-| 向量检索 | FAISS |
-| 数据存储 | SQLite + SQLAlchemy 2.0 |
-| 配置 / 校验 | Pydantic v2、pydantic-settings、python-dotenv |
-| PDF 解析 | pypdf、PyPDF2 |
-| 前端 | 原生 HTML / CSS / JavaScript、marked.js、DOMPurify |
-| 测试 | pytest、FastAPI TestClient |
+| Language | Python 3.12 |
+| Web backend | FastAPI, Uvicorn, Jinja2; SSE streaming |
+| LLM orchestration | LangChain 0.3 (Document Loader, TextSplitter, VectorStore, Retriever, PromptTemplate, LCEL) |
+| LLMs | OpenAI gpt-4o-mini, text-embedding-3-small; Responses API structured output |
+| Vector retrieval | FAISS |
+| Data storage | SQLite + SQLAlchemy 2.0 |
+| Configuration/validation | Pydantic v2, pydantic-settings, python-dotenv |
+| PDF parsing | pypdf, PyPDF2 |
+| Frontend | Native HTML/CSS/JavaScript, marked.js, DOMPurify |
+| Testing | pytest, FastAPI TestClient |
 
-### 新增技术栈
+### Added Technologies
 
-| 类别 | 技术 | 用途 |
+| Category | Technology | Purpose |
 |---|---|---|
-| 稀疏检索 | **rank-bm25**（Lucene IDF） | BM25 关键词检索 |
-| 中文分词 | **jieba** | 为 BM25 切分中文 |
-| 结果融合 | **RRF（Reciprocal Rank Fusion）** | 合并向量与 BM25 两路排名 |
-| 重排 | **LLM Reranker**（LangChain `with_structured_output` + JSON Schema） | 对候选段落逐一打 0–10 分 |
-| OCR | **RapidOCR**（ONNX Runtime）、**pypdfium2** | 扫描页渲染成图片并识别文字 |
-| 鉴权 | **PyJWT**、PBKDF2-HMAC-SHA256（hashlib）、HttpOnly / SameSite Cookie | 登录与数据隔离 |
-| 评估 | **LLM-as-a-judge**，自实现 hit@k / MRR / Faithfulness / Correctness | 量化 RAG 效果 |
-| 工程 | `asyncio.to_thread`、请求超时与降级、轻量数据库迁移、FAISS 字节序列化 | 稳定性与兼容性 |
+| Sparse retrieval | **rank-bm25** (Lucene IDF) | BM25 keyword retrieval |
+| Chinese tokenization | **jieba** | Tokenize Chinese text for BM25 |
+| Result fusion | **RRF (Reciprocal Rank Fusion)** | Combine vector and BM25 rankings |
+| Reranking | **LLM Reranker** (LangChain `with_structured_output` + JSON Schema) | Score candidate passages from 0–10 |
+| OCR | **RapidOCR** (ONNX Runtime), **pypdfium2** | Render scanned pages and recognize text |
+| Authentication | **PyJWT**, PBKDF2-HMAC-SHA256 (`hashlib`), HttpOnly/SameSite cookies | Login and data isolation |
+| Evaluation | **LLM-as-a-judge**, custom hit@k/MRR/Faithfulness/Correctness metrics | Quantify RAG quality |
+| Engineering | `asyncio.to_thread`, request timeouts and fallbacks, lightweight migrations, FAISS byte serialization | Reliability and compatibility |
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 pdf-chat/
-├── main.py                    应用入口：路由挂载、页面、登录跳转、启动检查
-├── config.py                  全部配置项（从 .env 读取）
-├── database.py / models.py    SQLite 连接、轻量迁移；User / Document / Conversation / ChatMessage
-├── schemas.py                 API 请求和响应的数据结构
-├── routers/                   【接口层】
-│   ├── auth.py                注册 / 登录 / 登出 / 当前用户
-│   ├── upload.py              上传与入库流水线
-│   ├── documents.py           文档列表 / 删除 / 结构化摘要
-│   ├── chat.py                问答（普通 + SSE 流式）、对话管理
-│   └── health.py              健康检查
-├── services/                  【业务层】
-│   ├── pdf_loader.py          文字提取 + OCR
-│   ├── chunking_service.py    跨页切块
-│   ├── embedding_service.py   文字 → 向量
-│   ├── vector_store.py        按用户隔离的 FAISS 索引
+├── main.py                    Application entry point: routes, pages, login redirects, startup checks
+├── config.py                  All configuration options (loaded from .env)
+├── database.py / models.py    SQLite connection and lightweight migrations; User / Document / Conversation / ChatMessage
+├── schemas.py                 API request and response schemas
+├── routers/                   [API layer]
+│   ├── auth.py                Registration / login / logout / current user
+│   ├── upload.py              Upload and ingestion pipeline
+│   ├── documents.py           Document list / deletion / structured summaries
+│   ├── chat.py                Q&A (regular + SSE streaming) and conversation management
+│   └── health.py              Health check
+├── services/                  [Business layer]
+│   ├── pdf_loader.py          Text extraction + OCR
+│   ├── chunking_service.py    Cross-page chunking
+│   ├── embedding_service.py   Text → vectors
+│   ├── vector_store.py        Per-user FAISS indices
 │   ├── keyword_search.py      BM25 + jieba
-│   ├── reranker.py            LLM 重排
-│   ├── retriever.py           混合检索管线（向量 → BM25 → RRF → 重排 → top-k）
-│   ├── prompt_templates.py    回答 / 问题改写 / 重排 / 摘要的提示词
-│   ├── conversation_memory.py 对话记忆
-│   ├── auth_service.py        密码哈希、JWT、当前用户依赖
-│   └── rag_service.py         RAG 编排
+│   ├── reranker.py            LLM reranking
+│   ├── retriever.py           Hybrid retrieval pipeline (vector → BM25 → RRF → reranking → top-k)
+│   ├── prompt_templates.py    Prompts for answers / rewriting / reranking / summaries
+│   ├── conversation_memory.py Conversation memory
+│   ├── auth_service.py        Password hashing, JWT, current-user dependency
+│   └── rag_service.py         RAG orchestration
 ├── evaluation/
-│   ├── run_eval.py            评估脚本（多配置对比、按题型统计）
-│   ├── check_dataset.py       标注页码自动核对
-│   ├── dataset_ml_book_test.json   40 题测试集
-│   └── dataset.example.json        11 题开发集
-├── templates/ static/         前端页面（含登录页）
-├── tests/                     35 个测试（检索、鉴权、OCR、切块等，离线运行）
-└── learn/rag_minimal.py       50 行 RAG 最小原型（学习用）
+│   ├── run_eval.py            Evaluation script (configuration comparison and question-type statistics)
+│   ├── check_dataset.py       Automatic page-annotation verification
+│   ├── dataset_ml_book_test.json   40-question test set
+│   └── dataset.example.json        11-question development set
+├── templates/ static/         Frontend pages, including the login page
+├── tests/                     35 tests (retrieval, authentication, OCR, chunking, and more; offline)
+└── learn/rag_minimal.py       50-line minimal RAG prototype for learning
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
-需要 Python 3.12（依赖锁定的版本在 3.14 上还没有安装包）和一个 OpenAI API Key。
+Python 3.12 is required (the locked dependency versions do not yet have packages for Python 3.14), along with an OpenAI API key.
 
 ```bash
-# 1. 创建虚拟环境并安装依赖
+# 1. Create a virtual environment and install dependencies
 py -3.12 -m venv venv
 venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 2. 配置
-copy .env.example .env        # 然后填入 OPENAI_API_KEY，并把 SECRET_KEY 改成随机字符串
+# 2. Configure
+copy .env.example .env        # then set OPENAI_API_KEY and change SECRET_KEY to a random string
 
-# 3. 启动
+# 3. Start
 venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 
-打开 http://127.0.0.1:8000 → 注册账号 → 上传 PDF → 开始提问。API 文档在 `/docs`，
-页面上的 **Authorize** 按钮可以填入登录返回的 token。
+Open http://127.0.0.1:8000, register an account, upload a PDF, and start asking questions. API documentation is available at `/docs`; the **Authorize** button on that page can be used with the token returned by login.
 
-> macOS / Linux：把 `venv\Scripts\python.exe` 换成 `venv/bin/python`。
+> macOS/Linux: replace `venv\Scripts\python.exe` with `venv/bin/python`.
 
 ---
 
-## 配置项
+## Configuration
 
-完整列表见 `.env.example`，常用的如下：
+See `.env.example` for the complete list. Common options include:
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 1000 / 200 | 切块大小与重叠 |
-| `RETRIEVER_K` | 4 | 最终交给模型的段落数 |
-| `RETRIEVAL_CANDIDATES` | 12 | 每路检索的候选数 |
-| `HYBRID_SEARCH_ENABLED` | true | 是否启用 BM25 |
-| `MIN_VECTOR_SIMILARITY` | 0.2 | 向量相似度门槛 |
-| `RERANK_ENABLED` / `RERANK_MIN_SCORE` | true / 4 | 是否重排、重排分数门槛 |
-| `OCR_ENABLED` / `OCR_MIN_CHARS` | true / 20 | 是否 OCR、触发 OCR 的字数阈值 |
-| `OPENAI_TIMEOUT_SECONDS` / `RERANK_TIMEOUT_SECONDS` | 60 / 20 | 请求超时 |
-| `SECRET_KEY` | 占位值 | JWT 签名密钥，**部署前必须修改** |
-| `REGISTRATION_INVITE_CODE` | 空 | 设置后，注册必须填写邀请码 |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 1000 / 200 | Chunk size and overlap |
+| `RETRIEVER_K` | 4 | Number of passages ultimately provided to the model |
+| `RETRIEVAL_CANDIDATES` | 12 | Candidate count for each retrieval method |
+| `HYBRID_SEARCH_ENABLED` | true | Whether to enable BM25 |
+| `MIN_VECTOR_SIMILARITY` | 0.2 | Vector similarity threshold |
+| `RERANK_ENABLED` / `RERANK_MIN_SCORE` | true / 4 | Whether to rerank and the minimum reranking score |
+| `OCR_ENABLED` / `OCR_MIN_CHARS` | true / 20 | Whether to enable OCR and the character threshold that triggers it |
+| `OPENAI_TIMEOUT_SECONDS` / `RERANK_TIMEOUT_SECONDS` | 60 / 20 | Request timeouts |
+| `SECRET_KEY` | placeholder | JWT signing key; **must be changed before deployment** |
+| `REGISTRATION_INVITE_CODE` | empty | If set, registration requires this invite code |
 
 ---
 
 ## API
 
-除 `/api/health` 和注册 / 登录外，所有接口都需要登录（Cookie 或 `Authorization: Bearer <token>`）。
+All endpoints except `/api/health` and registration/login require authentication (via cookie or `Authorization: Bearer <token>`).
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| POST | `/api/auth/register` · `/login` · `/logout` | 注册 / 登录 / 登出 |
-| GET | `/api/auth/me` | 当前用户 |
-| POST | `/api/upload` | 上传一个或多个 PDF |
-| GET / DELETE | `/api/documents` · `/api/documents/{id}` | 文档列表、详情、删除 |
-| POST | `/api/documents/{id}/summary` | 结构化摘要 |
-| GET / POST | `/api/conversations` | 对话列表、新建对话 |
-| GET / DELETE | `/api/conversations/{id}[/messages]` | 对话消息、删除对话 |
-| POST | `/api/chat` · `/api/chat/stream` | 提问（普通 / SSE 流式） |
-| GET | `/api/health` | 健康检查 |
+| POST | `/api/auth/register` · `/login` · `/logout` | Register / log in / log out |
+| GET | `/api/auth/me` | Current user |
+| POST | `/api/upload` | Upload one or more PDFs |
+| GET / DELETE | `/api/documents` · `/api/documents/{id}` | List, inspect, and delete documents |
+| POST | `/api/documents/{id}/summary` | Generate a structured summary |
+| GET / POST | `/api/conversations` | List and create conversations |
+| GET / DELETE | `/api/conversations/{id}[/messages]` | Read messages and delete conversations |
+| POST | `/api/chat` · `/api/chat/stream` | Ask a question (regular / SSE streaming) |
+| GET | `/api/health` | Health check |
 
 ---
 
-## 测试
+## Tests
 
 ```bash
 venv\Scripts\python.exe -m pytest
 ```
 
-共 35 个测试，**不需要 API Key**：检索相关测试使用离线的哈希向量模型代替 OpenAI。覆盖内容：
+There are 35 tests, and **no API key is required**: retrieval tests use an offline hash-based embedding model instead of OpenAI. Coverage includes:
 
-- 混合检索、RRF 融合、相似度门槛、重排过滤与失败降级
-- 按文档过滤时不会遗漏结果、中文 BM25、中文路径下的索引落盘
-- 用户之间的数据隔离、JWT 与 Cookie 鉴权
-- 扫描页 OCR、跨页切块的页码映射
+- Hybrid retrieval, RRF fusion, similarity thresholds, reranking filters, and failure fallbacks
+- Complete results when filtering by document, Chinese BM25, and index persistence under Chinese paths
+- User data isolation, JWT authentication, and cookie authentication
+- OCR for scanned pages and page mapping for cross-page chunks
 
 ---
 
-## 已知局限与后续方向
+## Known Limitations and Future Work
 
-- **重排的成本**：LLM 重排的延迟约 1.5 s。可以换成本地 cross-encoder（如 bge-reranker）降低延迟和费用。
-- **学习型稀疏检索**：可以尝试 SPLADE 等模型替代或补充 BM25，并用现有评估框架对比效果。
-- **评估的可信度**：扩大测试集规模；换用更强的评委模型；把标准答案改写为"必须包含的要点"清单。
-- **公式提取**：PDF 中的数学公式提取后会变成乱码，影响公式类问题。
-- **部署**：增加按用户的限流、调用费用统计；如需多实例部署，可迁移到托管向量数据库（pgvector、Qdrant 等）。
+- **Reranking cost**: LLM reranking adds approximately 1.5 seconds of latency. A local cross-encoder such as `bge-reranker` could reduce latency and cost.
+- **Learned sparse retrieval**: models such as SPLADE could replace or complement BM25 and be compared using the existing evaluation framework.
+- **Evaluation reliability**: expand the test set, use a stronger judge model, and rewrite reference answers as lists of required points.
+- **Formula extraction**: mathematical formulas extracted from PDFs can become garbled, affecting formula-related questions.
+- **Deployment**: add per-user rate limiting and usage-cost tracking; for multi-instance deployments, migrate to a managed vector database such as pgvector or Qdrant.
 
 ---
 
