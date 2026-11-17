@@ -12,6 +12,13 @@ For every question and every retrieval configuration it records:
                    expected page? (answerable questions)
     MRR          - mean reciprocal rank: 1/rank of the first correct
                    chunk (1.0 = always ranked first, 0 = never found)
+    evidence_recall  - share of the question's evidence groups (sources
+                       it needs) with at least one retrieved chunk
+    all_evidence_hit - every evidence group was retrieved (what a
+                       multi-source question needs to be answerable)
+  Cost (system under test only - the judge is not counted)
+    input/output tokens, number of chat model calls and dollars per
+    question (see evaluation/cost.py and evaluation/prices.json)
   Generation (judged by the chat model, "LLM-as-a-judge")
     faithfulness - share of the answer's claims supported by the
                    retrieved context (low = hallucination)
@@ -54,6 +61,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import math
 import sys
 import time
 import uuid
@@ -71,13 +80,21 @@ from langchain_openai import ChatOpenAI  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from config import get_settings  # noqa: E402
-from evaluation.evidence import chunk_doc_key, evidence_groups, first_hit_rank, groups_hit  # noqa: E402
+from evaluation.cost import load_prices, track_usage, usage_summary  # noqa: E402
+from evaluation.evidence import (  # noqa: E402
+    EvidenceGroup,
+    chunk_doc_key,
+    evidence_groups,
+    first_hit_rank,
+    groups_hit,
+)
 from services.chunking_service import chunk_document  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
 from services.rag_service import answer_from_documents, format_docs_for_context  # noqa: E402
 from services.retriever import retrieve  # noqa: E402
 from services.vector_store import add_document_chunks, delete_owner_index  # noqa: E402
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 CONFIGS = {
@@ -155,72 +172,125 @@ def index_pdfs(owner_id: str, pdfs: List[Path]) -> None:
         print(f"  {extracted.page_count} pages ({extracted.ocr_page_count} via OCR), {len(chunks)} chunks")
 
 
+def _retrieved_summary(docs: List[LCDocument]) -> List[dict]:
+    return [
+        {
+            "document": d.metadata.get("document_name"),
+            "doc": chunk_doc_key(d),
+            "pages": [d.metadata.get("page"), d.metadata.get("page_end")],
+            "rerank_score": d.metadata.get("rerank_score"),
+            "vector_similarity": d.metadata.get("vector_similarity"),
+        }
+        for d in docs
+    ]
+
+
+def _retrieval_scores(docs: List[LCDocument], groups: List[EvidenceGroup]) -> dict:
+    rank = first_hit_rank(docs, groups)
+    hits = groups_hit(docs, groups)
+    return {
+        "hit": rank is not None,
+        "reciprocal_rank": 1.0 / rank if rank else 0.0,
+        "evidence_hit": hits,
+        "evidence_recall": sum(hits) / len(hits),
+        "all_evidence_hit": all(hits),
+    }
+
+
+def _judge(judge_chain, item: dict, docs: List[LCDocument], answer: str) -> Optional[dict]:
+    """Grade one answer; None (with a warning) if the judge call fails."""
+    try:
+        verdict: Judgement = judge_chain.invoke(
+            {
+                "question": item["question"],
+                "context": format_docs_for_context(docs),
+                "answer": answer,
+                "reference": item["reference_answer"] if item.get("reference_answer") is not None else "NONE",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Judge call failed, question left unscored: %s", exc)
+        return None
+    return {
+        "faithfulness": max(0.0, min(1.0, verdict.faithfulness)),
+        "correctness": max(0.0, min(1.0, verdict.correctness)),
+        "judge_reasoning": verdict.reasoning,
+    }
+
+
+def _run_system(owner_id: str, item: dict, config: dict, k: int, generate: bool) -> tuple:
+    """Retrieval (+ answer) for one question, with the model calls they
+    make recorded. Returns (docs, answer or None, seconds, usage calls)."""
+    answer = None
+    with track_usage() as usage:
+        started = time.perf_counter()
+        docs = retrieve(owner_id, item["question"], k=k, **config)
+        latency = time.perf_counter() - started
+        if generate:
+            try:
+                answer = answer_from_documents(item["question"], [], docs)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Answer generation failed, question left unscored: %s", exc)
+    return docs, answer, latency, usage.calls
+
+
+def evaluate_question(owner_id: str, item: dict, config: dict, k: int, judge_chain, prices: dict) -> dict:
+    """Run and score one question under one retrieval configuration."""
+    answerable = item.get("reference_answer") is not None
+    groups = evidence_groups(item)
+    docs, answer, latency, calls = _run_system(owner_id, item, config, k, generate=judge_chain is not None)
+
+    row = {
+        "question": item["question"],
+        "category": item.get("category"),
+        "split": item.get("split"),
+        "hop_type": item.get("hop_type"),
+        "answerable": answerable,
+        "evidence_groups": groups,
+        "retrieved": _retrieved_summary(docs),
+        "retrieval_seconds": round(latency, 2),
+        **usage_summary(calls, prices),
+    }
+    if answerable and groups:
+        row.update(_retrieval_scores(docs, groups))
+    if answer is not None:
+        row["answer"] = answer
+        verdict = _judge(judge_chain, item, docs, answer)
+        if verdict:
+            row.update(verdict)
+    return row
+
+
+def _config_result(rows: List[dict]) -> dict:
+    categories = sorted({r["category"] for r in rows if r["category"]})
+    return {
+        "summary": summarize(rows),
+        "by_category": {c: summarize([r for r in rows if r["category"] == c]) for c in categories},
+        "questions": rows,
+    }
+
+
 def evaluate(owner_id: str, dataset: List[dict], config_names: List[str], k: int, judge: bool) -> dict:
     judge_chain = _judge_chain() if judge else None
+    prices = load_prices()
     results = {}
 
     for name in config_names:
         print(f"\n[{name}]", flush=True)
         rows = []
         for n, item in enumerate(dataset, start=1):
-            answerable = item.get("reference_answer") is not None
-            started = time.perf_counter()
-            docs = retrieve(owner_id, item["question"], k=k, **CONFIGS[name])
-            latency = time.perf_counter() - started
-
-            groups = evidence_groups(item)
-            row = {
-                "question": item["question"],
-                "category": item.get("category"),
-                "split": item.get("split"),
-                "hop_type": item.get("hop_type"),
-                "answerable": answerable,
-                "evidence_groups": groups,
-                "retrieved": [
-                    {
-                        "document": d.metadata.get("document_name"),
-                        "doc": chunk_doc_key(d),
-                        "pages": [d.metadata.get("page"), d.metadata.get("page_end")],
-                        "rerank_score": d.metadata.get("rerank_score"),
-                        "vector_similarity": d.metadata.get("vector_similarity"),
-                    }
-                    for d in docs
-                ],
-                "retrieval_seconds": round(latency, 2),
-            }
-            if answerable and groups:
-                rank = first_hit_rank(docs, groups)
-                row["hit"] = rank is not None
-                row["reciprocal_rank"] = 1.0 / rank if rank else 0.0
-
-            if judge:
-                answer = answer_from_documents(item["question"], [], docs)
-                verdict: Judgement = judge_chain.invoke(
-                    {
-                        "question": item["question"],
-                        "context": format_docs_for_context(docs),
-                        "answer": answer,
-                        "reference": item["reference_answer"] if answerable else "NONE",
-                    }
-                )
-                row.update(
-                    answer=answer,
-                    faithfulness=max(0.0, min(1.0, verdict.faithfulness)),
-                    correctness=max(0.0, min(1.0, verdict.correctness)),
-                    judge_reasoning=verdict.reasoning,
-                )
-
-            rows.append(row)
+            rows.append(evaluate_question(owner_id, item, CONFIGS[name], k, judge_chain, prices))
             print(f"  {n}/{len(dataset)} done", end="\r", flush=True)
-        categories = sorted({r["category"] for r in rows if r["category"]})
-        results[name] = {
-            "summary": summarize(rows),
-            "by_category": {
-                c: summarize([r for r in rows if r["category"] == c]) for c in categories
-            },
-            "questions": rows,
-        }
+        results[name] = _config_result(rows)
     return results
+
+
+def _p95(values: List[float]) -> Optional[float]:
+    """Nearest-rank 95th percentile (no interpolation)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return round(ordered[math.ceil(0.95 * len(ordered)) - 1], 3)
 
 
 def summarize(rows: List[dict]) -> dict:
@@ -235,12 +305,22 @@ def summarize(rows: List[dict]) -> dict:
     return {
         "hit_rate": avg([1.0 if r["hit"] else 0.0 for r in retrieval_rows]),
         "mrr": avg([r["reciprocal_rank"] for r in retrieval_rows]),
+        "evidence_recall": avg([r["evidence_recall"] for r in retrieval_rows]),
+        "all_evidence_hit_rate": avg([1.0 if r["all_evidence_hit"] else 0.0 for r in retrieval_rows]),
         "faithfulness": avg([r["faithfulness"] for r in judged]),
         "correctness": avg([r["correctness"] for r in answerable]),
         "refusal_accuracy": avg([r["correctness"] for r in unanswerable]),
         "avg_retrieval_seconds": avg([r["retrieval_seconds"] for r in rows]),
         # The median isn't skewed by one stalled request the way the mean is.
         "median_retrieval_seconds": round(median(r["retrieval_seconds"] for r in rows), 3) if rows else None,
+        "p95_retrieval_seconds": _p95([r["retrieval_seconds"] for r in rows]),
+        "avg_llm_calls": avg([r["llm_calls"] for r in rows if "llm_calls" in r]),
+        # Rows with an unknown price (cost None) are left out of the average.
+        "avg_cost_usd": (
+            round(mean(costs), 6)
+            if (costs := [r["cost_usd"] for r in rows if r.get("cost_usd") is not None])
+            else None
+        ),
     }
 
 

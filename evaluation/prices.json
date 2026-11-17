@@ -1,0 +1,6 @@
+{
+  "_note": "USD per 1M tokens, by provider then model. Indicative only - always check the provider's official pricing page (以官网为准); prices change. A model missing here is reported as cost null with a warning.",
+  "openai": {
+    "gpt-4o-mini": {"input_per_1m": 0.15, "output_per_1m": 0.60}
+  }
+}
