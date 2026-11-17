@@ -1,0 +1,177 @@
+{
+  "_readme": "DiploDoc public corpus manifest (draft, 2026-11-17). status=verified: URL seen on an official page or in search results pointing to the official domain. status=to_check: URL built from the site's naming pattern or not yet confirmed; open it in a browser before running the download script. Do not commit downloaded files.",
+  "documents": [
+    {
+      "doc_id": "paris-agreement-en",
+      "title": "Paris Agreement",
+      "doc_type": "traite",
+      "language": "en",
+      "date": "2015-12-12",
+      "un_symbol": null,
+      "url": "https://unfccc.int/files/essential_background/convention/application/pdf/english_paris_agreement.pdf",
+      "format": "pdf",
+      "status": "verified"
+    },
+    {
+      "doc_id": "paris-agreement-fr",
+      "title": "Accord de Paris",
+      "doc_type": "traite",
+      "language": "fr",
+      "date": "2015-12-12",
+      "un_symbol": null,
+      "url": "https://unfccc.int/files/essential_background/convention/application/pdf/french_paris_agreement.pdf",
+      "format": "pdf",
+      "status": "verified"
+    },
+    {
+      "doc_id": "a-res-77-276-fr",
+      "title": "Résolution 77/276 — Demande d'avis consultatif de la CIJ sur les obligations des États à l'égard des changements climatiques",
+      "doc_type": "resolution",
+      "language": "fr",
+      "date": "2023-03-29",
+      "un_symbol": "A/RES/77/276",
+      "url": "https://digitallibrary.un.org/record/4008332/files/A_RES_77_276-FR.pdf",
+      "format": "pdf",
+      "status": "verified",
+      "note": "Date and 'adopted without a vote' to confirm in the meeting record."
+    },
+    {
+      "doc_id": "a-res-77-276-en",
+      "title": "Resolution 77/276 — Request for an advisory opinion of the ICJ on the obligations of States in respect of climate change",
+      "doc_type": "resolution",
+      "language": "en",
+      "date": "2023-03-29",
+      "un_symbol": "A/RES/77/276",
+      "url": "https://digitallibrary.un.org/record/4008332/files/A_RES_77_276-EN.pdf",
+      "format": "pdf",
+      "status": "to_check"
+    },
+    {
+      "doc_id": "icj-ao-187-fr",
+      "title": "CIJ — Obligations des États en matière de changement climatique, avis consultatif du 23 juillet 2025",
+      "doc_type": "avis_cij",
+      "language": "fr",
+      "date": "2025-07-23",
+      "un_symbol": null,
+      "url": "https://www.icj-cij.org/sites/default/files/case-related/187/187-20250723-adv-01-00-fr.pdf",
+      "format": "pdf",
+      "status": "verified"
+    },
+    {
+      "doc_id": "icj-ao-187-en",
+      "title": "ICJ — Obligations of States in respect of Climate Change, Advisory Opinion of 23 July 2025",
+      "doc_type": "avis_cij",
+      "language": "en",
+      "date": "2025-07-23",
+      "un_symbol": null,
+      "url": "https://www.icj-cij.org/sites/default/files/case-related/187/187-20250723-adv-01-00-en.pdf",
+      "format": "pdf",
+      "status": "verified"
+    },
+    {
+      "doc_id": "a-80-l65-en",
+      "title": "Draft resolution A/80/L.65 — Advisory opinion of the ICJ on the obligations of States in respect of climate change",
+      "doc_type": "resolution",
+      "language": "en",
+      "date": "2026-05-13",
+      "un_symbol": "A/80/L.65",
+      "url": "https://documents.un.org/doc/undoc/ltd/n26/115/58/pdf/n2611558.pdf",
+      "format": "pdf",
+      "status": "verified",
+      "note": "Draft text. Adopted 2026-05-20 (141-8-28). Final A/RES/80/... number not yet shown on the Digital Library voting record; replace with the final resolution when published, and check in A/80/PV.83 whether any amendment changed the text."
+    },
+    {
+      "doc_id": "a-80-l65-fr",
+      "title": "Projet de résolution A/80/L.65",
+      "doc_type": "resolution",
+      "language": "fr",
+      "date": "2026-05-13",
+      "un_symbol": "A/80/L.65",
+      "url": "https://digitallibrary.un.org/record/4113865/files/A_80_L.65-FR.pdf",
+      "format": "pdf",
+      "status": "to_check"
+    },
+    {
+      "doc_id": "a-80-pv83-en",
+      "title": "General Assembly, 80th session, 83rd plenary meeting (verbatim, includes explanations of vote)",
+      "doc_type": "proces_verbal",
+      "language": "en",
+      "date": "2026-05-20",
+      "un_symbol": "A/80/PV.83",
+      "url": "https://transcripts.un.org/en/ga/80/83.txt",
+      "format": "txt",
+      "status": "verified",
+      "note": "Plain-text transcript. The official PDF of A/80/PV.83 (6 languages) is better for citations once published; ingestion needs txt support or conversion to PDF."
+    },
+    {
+      "doc_id": "ga-12760-en",
+      "title": "UN press release GA/12760 — General Assembly adopts climate resolution on ICJ advisory opinion",
+      "doc_type": "communique",
+      "language": "en",
+      "date": "2026-05-20",
+      "un_symbol": "GA/12760",
+      "url": "https://press.un.org/en/2026/ga12760.doc.htm",
+      "format": "html",
+      "status": "verified",
+      "note": "HTML page: save as PDF or add HTML ingestion. Meetings coverage is not an official record."
+    },
+    {
+      "doc_id": "un-news-zh-2026-05",
+      "title": "联大欢迎国际法院气候咨询意见 强调各国有义务防止气候损害（联合国新闻）",
+      "doc_type": "communique",
+      "language": "zh",
+      "date": "2026-05",
+      "un_symbol": null,
+      "url": "https://news.un.org/zh/story/2026/05/1142190",
+      "format": "html",
+      "status": "verified",
+      "note": "Optional: Chinese-language source for cross-language questions."
+    },
+    {
+      "doc_id": "a-res-80-138-en",
+      "title": "Resolution 80/138 — Protection of global climate for present and future generations of humankind",
+      "doc_type": "resolution",
+      "language": "en",
+      "date": "2025-12-15",
+      "un_symbol": "A/RES/80/138",
+      "url": "https://docs.un.org/en/A/RES/80/138",
+      "format": "pdf",
+      "status": "to_check",
+      "note": "Vote 181-1-0 reported by a third-party site (un-project.org); confirm on the UN Digital Library voting record."
+    },
+    {
+      "doc_id": "cma-2023-16a01-en",
+      "title": "Decision 1/CMA.5 — Outcome of the first global stocktake",
+      "doc_type": "decision_cop",
+      "language": "en",
+      "date": "2023-12-13",
+      "un_symbol": "FCCC/PA/CMA/2023/16/Add.1",
+      "url": "https://unfccc.int/sites/default/files/resource/cma2023_16a01E.pdf",
+      "format": "pdf",
+      "status": "verified"
+    }
+  ],
+  "voting_data": [
+    {
+      "id": "unga-bulk-1946-2025",
+      "title": "UN General Assembly voting data: resolutions 1 (1946) to 79/328 (5 September 2025)",
+      "page": "https://digitallibrary.un.org/record/4060887",
+      "status": "verified",
+      "note": "Recorded votes only (no consensus adoptions). Does NOT include the 80th session (2025-2026). UN copyright; non-commercial use with attribution. CSV link may only appear in a browser."
+    },
+    {
+      "id": "vote-a-80-l65",
+      "title": "Voting record — Advisory opinion of the ICJ on the obligations of States in respect of climate change (2026-05-20)",
+      "page": "https://digitallibrary.un.org/record/4114032",
+      "status": "verified",
+      "note": "Per-country votes shown on the page (141 Y, 8 N, 28 A, 16 non-voting). Export formats are metadata (MARCXML etc.); check whether the per-country list is included, otherwise transcribe it into a small CSV."
+    },
+    {
+      "id": "vote-a-res-80-138",
+      "title": "Voting record — Protection of global climate (A/RES/80/138)",
+      "page": null,
+      "status": "to_check",
+      "note": "Find it in the Digital Library 'Voting Data' collection."
+    }
+  ]
+}
