@@ -115,9 +115,16 @@ class Judgement(BaseModel):
     reasoning: str
 
 
+def _judge_model() -> str:
+    return settings.judge_model or settings.openai_chat_model
+
+
 def _judge_chain():
+    # Built directly (not through any app-side model factory) on purpose:
+    # the judge must stay the same whatever deployment mode the system
+    # under test runs in, or scores across runs stop being comparable.
     llm = ChatOpenAI(
-        model=settings.openai_chat_model,
+        model=_judge_model(),
         api_key=settings.openai_api_key or None,
         temperature=0.0,
         timeout=settings.openai_timeout_seconds,
@@ -320,6 +327,7 @@ def main() -> None:
         "k": args.k,
         "settings": {
             "chat_model": settings.openai_chat_model,
+            "judge_model": _judge_model(),
             "embedding_model": settings.openai_embedding_model,
             "chunk_size": settings.chunk_size,
             "chunk_overlap": settings.chunk_overlap,

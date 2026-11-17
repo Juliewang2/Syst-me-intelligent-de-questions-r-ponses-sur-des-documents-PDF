@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = Field(default=60.0, gt=0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
 
+    # --- Evaluation ---
+    # Model used by evaluation/run_eval.py to grade answers. Empty = use
+    # OPENAI_CHAT_MODEL. Keeping the judge fixed means changing the model
+    # under test doesn't silently change the grading standard too.
+    judge_model: str = Field(default="")
+
     # --- Database ---
     database_url: str = Field(default=f"sqlite:///{BASE_DIR}/data/pdf_chat.db")
 
