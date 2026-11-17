@@ -10,9 +10,10 @@ SQLAlchemy ORM models representing the persistent data model:
 """
 
 import uuid
+from datetime import date as date_type
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -55,6 +56,18 @@ class Document(Base):
     # status in {"processing", "ready", "failed"}
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=True)
+    # Corpus metadata (services/document_meta.py); all NULL unless
+    # CORPUS_METADATA_ENABLED was on when the document was ingested.
+    doc_id: Mapped[str] = mapped_column(String(128), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=True)
+    doc_type: Mapped[str] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=True)
+    classification: Mapped[str] = mapped_column(String(16), nullable=True)
+    language: Mapped[str] = mapped_column(String(16), nullable=True)
+    date: Mapped[date_type] = mapped_column(Date, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=True)
+    supersedes: Mapped[str] = mapped_column(String(128), nullable=True)
+    un_symbol: Mapped[str] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -74,6 +87,16 @@ class Document(Base):
             "status": self.status,
             "error_message": self.error_message,
             "summary": self.summary,
+            "doc_id": self.doc_id,
+            "title": self.title,
+            "doc_type": self.doc_type,
+            "source": self.source,
+            "classification": self.classification,
+            "language": self.language,
+            "date": self.date.isoformat() if self.date else None,
+            "version": self.version,
+            "supersedes": self.supersedes,
+            "un_symbol": self.un_symbol,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -55,6 +55,17 @@ class DocumentResponse(BaseModel):
     status: str
     error_message: Optional[str] = None
     summary: Optional[str] = None
+    # Corpus metadata; null unless CORPUS_METADATA_ENABLED was on at ingestion.
+    doc_id: Optional[str] = None
+    title: Optional[str] = None
+    doc_type: Optional[str] = None
+    source: Optional[str] = None
+    classification: Optional[str] = None
+    language: Optional[str] = None
+    date: Optional[str] = None
+    version: Optional[int] = None
+    supersedes: Optional[str] = None
+    un_symbol: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -90,6 +101,11 @@ class SourceChunk(BaseModel):
     page_end: Optional[int] = Field(default=None, description="Last page the chunk spans")
     chunk_index: Optional[int] = None
     text_snippet: str
+    # Corpus metadata, when the document has it.
+    title: Optional[str] = None
+    un_symbol: Optional[str] = None
+    date: Optional[str] = None
+    classification: Optional[str] = None
 
 
 class ChatMessageResponse(BaseModel):

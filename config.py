@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     # short timeout and no retries rather than holding up the answer.
     rerank_timeout_seconds: float = Field(default=20.0, gt=0)
 
+    # --- Diplomatic corpus ---
+    # Read document metadata (sidecar .json / upload field) and copy it onto
+    # chunks so retrieval can filter on it. Off = documents and chunks are
+    # stored exactly as before. When on, a document without metadata is
+    # treated as DR_SIMULE (restricted) - the safe default.
+    corpus_metadata_enabled: bool = Field(default=False)
+    public_corpus_dir: Path = Field(default=BASE_DIR / "data" / "corpus" / "public")
+    un_votes_db_path: Path = Field(default=BASE_DIR / "data" / "un_votes.sqlite")
+
     # --- OCR (for scanned PDFs without a text layer) ---
     ocr_enabled: bool = Field(default=True)
     # Pages whose extracted text is shorter than this are sent to OCR.
