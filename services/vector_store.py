@@ -7,7 +7,9 @@ so one user's search can never return another user's documents, and
 a search only has to scan that user's vectors.
 
 Within a user's index, chunks are tagged with `document_id` metadata
-so retrieval can be scoped to a single document. LangChain's FAISS
+so retrieval can be scoped to a single document (and, with corpus
+metadata, to source / type / classification / dates - see
+services/chunk_filters.py). LangChain's FAISS
 wrapper applies metadata filters *after* the nearest-neighbour search,
 so when filtering we search the whole index (`fetch_k = ntotal`) to be
 sure matching chunks are never cut off before the filter runs. For
@@ -31,6 +33,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document as LCDocument
 
 from config import get_settings
+from services.chunk_filters import make_predicate
 from services.embedding_service import get_embeddings
 
 logger = logging.getLogger(__name__)
@@ -172,16 +175,22 @@ def similarity_search_with_scores(
     query: str,
     k: int = 4,
     document_id: Optional[str] = None,
+    filters: Optional[dict] = None,
 ) -> List[Tuple[LCDocument, float]]:
     """Semantic search in the owner's index. Returns (chunk, cosine
     similarity) pairs, most similar first. Cosine similarity is 1 for
-    identical meaning and around 0 for unrelated text."""
+    identical meaning and around 0 for unrelated text. `filters` limits
+    the search to chunks whose metadata matches (see chunk_filters)."""
     vs = get_vectorstore(owner_id)
     if vs is None or vs.index.ntotal == 0:
         return []
 
     search_kwargs = {}
-    if document_id:
+    if filters:
+        # Same as the document filter below: scan the whole index so the
+        # filter can't cut matching chunks off. Free for a flat index.
+        search_kwargs = {"filter": make_predicate(filters, document_id), "fetch_k": vs.index.ntotal}
+    elif document_id:
         search_kwargs = {"filter": {"document_id": document_id}, "fetch_k": vs.index.ntotal}
 
     results = vs.similarity_search_with_score(query, k=k, **search_kwargs)

@@ -82,9 +82,18 @@ def format_docs_for_context(docs: List[LCDocument]) -> str:
 
     parts = []
     for i, doc in enumerate(docs, start=1):
-        name = doc.metadata.get("document_name", "document")
-        parts.append(f"[Source {i} | {name} | {_page_label(doc)}]\n{doc.page_content.strip()}")
+        header = " | ".join([f"Source {i}", *_citation_fields(doc), _page_label(doc)])
+        parts.append(f"[{header}]\n{doc.page_content.strip()}")
     return "\n\n".join(parts)
+
+
+def _citation_fields(doc: LCDocument) -> List[str]:
+    """Title (or file name), then UN symbol and date when the chunk has
+    corpus metadata. Without it this is just the file name, as before."""
+    meta = doc.metadata
+    fields = [meta.get("title") or meta.get("document_name", "document")]
+    fields += [meta[key] for key in ("un_symbol", "date") if meta.get(key)]
+    return fields
 
 
 def _page_label(doc: LCDocument) -> str:
@@ -111,6 +120,10 @@ def docs_to_source_dicts(docs: List[LCDocument]) -> List[dict]:
                 "text_snippet": snippet,
                 "rerank_score": doc.metadata.get("rerank_score"),
                 "vector_similarity": doc.metadata.get("vector_similarity"),
+                "title": doc.metadata.get("title"),
+                "un_symbol": doc.metadata.get("un_symbol"),
+                "date": doc.metadata.get("date"),
+                "classification": doc.metadata.get("classification"),
             }
         )
     return sources

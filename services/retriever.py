@@ -15,7 +15,9 @@ question. Given a question it:
   5. Top-k            - the best `k` chunks go into the prompt.
 
 Every step is switchable (settings, or per-call overrides used by the
-evaluation script to compare configurations). The pipeline is also
+evaluation script to compare configurations). Optional metadata
+`filters` (source, doc_type, classification, date range - see
+services/chunk_filters.py) apply to both searches before ranking. The pipeline is also
 exposed as a LangChain `BaseRetriever` so it plugs into LCEL chains.
 """
 
@@ -71,9 +73,11 @@ def retrieve(
     k: Optional[int] = None,
     hybrid: Optional[bool] = None,
     use_rerank: Optional[bool] = None,
+    filters: Optional[dict] = None,
 ) -> List[LCDocument]:
     """Run the full retrieval pipeline and return up to k chunks, best
-    first. `hybrid` / `use_rerank` override the settings when given."""
+    first. `hybrid` / `use_rerank` override the settings when given;
+    `filters` restricts both searches to matching chunks."""
     k = k or settings.retriever_k
     hybrid = settings.hybrid_search_enabled if hybrid is None else hybrid
     use_rerank = settings.rerank_enabled if use_rerank is None else use_rerank
@@ -83,7 +87,7 @@ def retrieve(
     vector_hits = [
         _with_scores(doc, vector_similarity=round(similarity, 4))
         for doc, similarity in similarity_search_with_scores(
-            owner_id, query, k=n_candidates, document_id=document_id
+            owner_id, query, k=n_candidates, document_id=document_id, filters=filters
         )
         if similarity >= settings.min_vector_similarity
     ]
@@ -92,7 +96,12 @@ def retrieve(
     # 2. Keyword search.
     if hybrid:
         ranked_lists.append(
-            [doc for doc, _ in keyword_search(owner_id, query, k=n_candidates, document_id=document_id)]
+            [
+                doc
+                for doc, _ in keyword_search(
+                    owner_id, query, k=n_candidates, document_id=document_id, filters=filters
+                )
+            ]
         )
 
     # 3. Fusion.
@@ -121,6 +130,7 @@ class PDFChatRetriever(BaseRetriever):
     document_id: Optional[str] = Field(default=None)
     hybrid: Optional[bool] = Field(default=None)
     use_rerank: Optional[bool] = Field(default=None)
+    filters: Optional[dict] = Field(default=None)
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> List[LCDocument]:  # noqa: ANN001
         return retrieve(
@@ -130,6 +140,7 @@ class PDFChatRetriever(BaseRetriever):
             k=self.k,
             hybrid=self.hybrid,
             use_rerank=self.use_rerank,
+            filters=self.filters,
         )
 
 
@@ -139,6 +150,7 @@ def get_retriever(
     k: Optional[int] = None,
     hybrid: Optional[bool] = None,
     use_rerank: Optional[bool] = None,
+    filters: Optional[dict] = None,
 ) -> PDFChatRetriever:
     """Factory for a scoped retriever instance."""
     return PDFChatRetriever(
@@ -147,4 +159,5 @@ def get_retriever(
         document_id=document_id,
         hybrid=hybrid,
         use_rerank=use_rerank,
+        filters=filters,
     )

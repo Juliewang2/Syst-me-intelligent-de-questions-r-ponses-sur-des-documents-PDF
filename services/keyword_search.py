@@ -29,6 +29,7 @@ import jieba
 from langchain_core.documents import Document as LCDocument
 from rank_bm25 import BM25Okapi
 
+from services.chunk_filters import make_predicate
 from services.vector_store import get_all_chunks, index_version
 
 jieba.setLogLevel(logging.WARNING)
@@ -83,14 +84,18 @@ def keyword_search(
     query: str,
     k: int = 4,
     document_id: Optional[str] = None,
+    filters: Optional[dict] = None,
 ) -> List[Tuple[LCDocument, float]]:
     """Return up to k (chunk, BM25 score) pairs, best first. Chunks that
-    share no words with the query (score 0) are never returned."""
+    share no words with the query (score 0) are never returned. With
+    `filters`, only chunks whose metadata matches are candidates."""
     index = _get_index(owner_id)
     query_tokens = tokenize(query)
     if index is None or not query_tokens:
         return []
     chunks, bm25 = index
+    if filters:
+        return _filtered_search(chunks, bm25, query_tokens, k, make_predicate(filters, document_id))
 
     scores = bm25.get_scores(query_tokens)
     ranked = sorted(range(len(chunks)), key=lambda i: scores[i], reverse=True)
@@ -103,6 +108,19 @@ def keyword_search(
             continue
         results.append((chunks[i], float(scores[i])))
     return results
+
+
+def _filtered_search(
+    chunks: List[LCDocument], bm25: BM25Okapi, query_tokens: List[str], k: int, predicate
+) -> List[Tuple[LCDocument, float]]:
+    """Rank only the chunks the predicate accepts. The candidate set is
+    chosen first, so filtering can't cut off matches. IDF still comes
+    from the user's whole index, which keeps scores comparable whatever
+    the filter."""
+    scores = bm25.get_scores(query_tokens)
+    candidates = [i for i, chunk in enumerate(chunks) if predicate(chunk.metadata) and scores[i] > 0]
+    candidates.sort(key=lambda i: scores[i], reverse=True)
+    return [(chunks[i], float(scores[i])) for i in candidates[:k]]
 
 
 def reset_cache() -> None:
