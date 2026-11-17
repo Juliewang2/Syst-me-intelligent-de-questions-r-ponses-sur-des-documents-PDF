@@ -92,6 +92,7 @@ from evaluation.evidence import (  # noqa: E402
     first_hit_rank,
     groups_hit,
 )
+from evaluation.failures import write_failures_report  # noqa: E402
 from evaluation.stats import mcnemar_exact, paired_bootstrap  # noqa: E402
 from services.chunking_service import chunk_document  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
@@ -554,7 +555,8 @@ def main() -> None:
 
     out_dir = ROOT / "evaluation" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"eval_{datetime.now():%Y%m%d_%H%M%S}.json"
+    timestamp = f"{datetime.now():%Y%m%d_%H%M%S}"
+    out_file = out_dir / f"eval_{timestamp}.json"
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "pdfs": [p.name for p in args.pdf],
@@ -577,6 +579,10 @@ def main() -> None:
     }
     out_file.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nDetailed results: {out_file}")
+
+    failures_file = out_dir / f"failures_{timestamp}.md"
+    write_failures_report(results, failures_file)
+    print(f"Failed questions: {failures_file}")
 
 
 if __name__ == "__main__":
