@@ -34,6 +34,10 @@ Usage (from the project root, with a real OPENAI_API_KEY in .env):
     venv\\Scripts\\python.exe evaluation\\run_eval.py --pdf path\\to\\book.pdf
     venv\\Scripts\\python.exe evaluation\\run_eval.py --pdf a.pdf --pdf b.pdf \\
         --dataset evaluation\\my_questions.json --configs vector,hybrid+rerank
+    # 3 runs each, mean +/- std, and every config compared with `vector`
+    # (bootstrap 95% CI per metric, McNemar p-value for hit; see stats.py)
+    venv\\Scripts\\python.exe evaluation\\run_eval.py --pdf book.pdf \\
+        --repeats 3 --baseline-config vector
 
 The dataset is a JSON list of
     {"question": ..., "reference_answer": ... or null,
@@ -68,8 +72,8 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from statistics import mean, median
-from typing import List, Optional
+from statistics import mean, median, stdev
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -88,6 +92,7 @@ from evaluation.evidence import (  # noqa: E402
     first_hit_rank,
     groups_hit,
 )
+from evaluation.stats import mcnemar_exact, paired_bootstrap  # noqa: E402
 from services.chunking_service import chunk_document  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
 from services.rag_service import answer_from_documents, format_docs_for_context  # noqa: E402
@@ -369,6 +374,131 @@ def print_category_table(results: dict, k: int) -> None:
         print(f"{category + f' ({n})':<15}{cells}")
 
 
+# ---------------------------------------------------------------------------
+# Repeats and comparison with a baseline configuration
+# ---------------------------------------------------------------------------
+
+# Per-question fields compared against the baseline (report name -> row field).
+COMPARED_METRICS = {
+    "hit": "hit",
+    "mrr": "reciprocal_rank",
+    "evidence_recall": "evidence_recall",
+    "faithfulness": "faithfulness",
+    "correctness": "correctness",
+    "cost_usd": "cost_usd",
+}
+
+
+def aggregate_repeats(summaries: List[dict]) -> dict:
+    """{metric: {mean, std}} over the repeats' summaries (std 0 for one run)."""
+    aggregate = {}
+    for key in summaries[0]:
+        values = [s[key] for s in summaries if s[key] is not None]
+        if values:
+            std = stdev(values) if len(values) > 1 else 0.0
+            aggregate[key] = {"mean": round(mean(values), 4), "std": round(std, 4)}
+        else:
+            aggregate[key] = {"mean": None, "std": None}
+    return aggregate
+
+
+def _per_question_means(runs: List[List[dict]], field: str) -> List[Optional[float]]:
+    """Each question's value averaged over the repeats (None if never scored)."""
+    means = []
+    for i in range(len(runs[0])):
+        values = [float(run[i][field]) for run in runs if run[i].get(field) is not None]
+        means.append(mean(values) if values else None)
+    return means
+
+
+def _majority_hits(runs: List[List[dict]]) -> List[Optional[bool]]:
+    """A question counts as hit if it was hit in at least half the repeats."""
+    hits = []
+    for i in range(len(runs[0])):
+        values = [run[i]["hit"] for run in runs if "hit" in run[i]]
+        hits.append(sum(values) >= len(values) / 2 if values else None)
+    return hits
+
+
+def _paired(a: List, b: List) -> tuple:
+    pairs = [(x, y) for x, y in zip(a, b) if x is not None and y is not None]
+    return [x for x, _ in pairs], [y for _, y in pairs]
+
+
+def compare_to_baseline(runs_by_config: Dict[str, List[List[dict]]], baseline: str) -> dict:
+    """Per config: difference to the baseline with a 95% bootstrap CI for
+    each metric, and McNemar's p-value for hit."""
+    comparison = {}
+    for name, runs in runs_by_config.items():
+        if name == baseline:
+            continue
+        entry = {}
+        for metric, field in COMPARED_METRICS.items():
+            a, b = _paired(_per_question_means(runs, field), _per_question_means(runs_by_config[baseline], field))
+            if a:
+                entry[metric] = {**paired_bootstrap(a, b), "n": len(a)}
+        a, b = _paired(_majority_hits(runs), _majority_hits(runs_by_config[baseline]))
+        if a:
+            entry["hit_mcnemar"] = mcnemar_exact(a, b)
+        comparison[name] = entry
+    return comparison
+
+
+def evaluate_repeats(
+    owner_id: str, dataset: List[dict], config_names: List[str], k: int, judge: bool, repeats: int
+) -> List[dict]:
+    runs = []
+    for r in range(1, repeats + 1):
+        if repeats > 1:
+            print(f"\n=== Repeat {r}/{repeats} ===", flush=True)
+        runs.append(evaluate(owner_id, dataset, config_names, k, judge))
+    return runs
+
+
+def merge_repeats(runs: List[dict]) -> dict:
+    """The first run's full results (so existing readers of the report
+    keep working), plus every run's summary and their mean/std."""
+    results = runs[0]
+    for name in results:
+        summaries = [run[name]["summary"] for run in runs]
+        results[name]["repeats"] = summaries
+        results[name]["aggregate"] = aggregate_repeats(summaries)
+    return results
+
+
+def _fmt(value: Optional[float], digits: int = 3) -> str:
+    return "-" if value is None else f"{value:+.{digits}f}"
+
+
+def print_aggregate_table(results: dict, k: int, repeats: int) -> None:
+    keys = [(f"hit@{k}", "hit_rate"), ("MRR", "mrr"), ("ev_recall", "evidence_recall"),
+            ("faithful", "faithfulness"), ("correct", "correctness"), ("$/question", "avg_cost_usd")]
+    header = f"{'config':<15}" + "".join(f"{title:>18}" for title, _ in keys)
+    print(f"\nMean +/- std over {repeats} repeats:\n{header}\n" + "-" * len(header))
+    for name, result in results.items():
+        cells = ""
+        for _, key in keys:
+            agg = result["aggregate"][key]
+            cell = "-" if agg["mean"] is None else f"{agg['mean']:.3f}+/-{agg['std']:.3f}"
+            cells += f"{cell:>18}"
+        print(f"{name:<15}{cells}")
+
+
+def print_comparison(comparison: dict, baseline: str) -> None:
+    print(f"\nDifference vs. {baseline} (mean, 95% bootstrap CI):")
+    for name, entry in comparison.items():
+        print(f"  {name}")
+        for metric in COMPARED_METRICS:
+            if metric in entry:
+                d = entry[metric]
+                digits = 6 if metric == "cost_usd" else 3
+                print(f"    {metric:<16}{_fmt(d['mean_diff'], digits)}  "
+                      f"[{_fmt(d['ci_low'], digits)}, {_fmt(d['ci_high'], digits)}]  n={d['n']}")
+        if "hit_mcnemar" in entry:
+            m = entry["hit_mcnemar"]
+            print(f"    hit McNemar     b01={m['b01']} b10={m['b10']} p={m['p_value']:.4f}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate PDF Chat retrieval and answer quality.")
     parser.add_argument("--pdf", action="append", required=True, type=Path, help="PDF to index (repeatable)")
@@ -382,23 +512,45 @@ def main() -> None:
     parser.add_argument(
         "--retrieval-only", action="store_true", help="Skip answer generation and judging (cheaper)"
     )
+    parser.add_argument(
+        "--repeats", type=int, default=1, help="Run everything N times; report mean +/- std (cost x N)"
+    )
+    parser.add_argument(
+        "--baseline-config", help="Compare every other config to this one (bootstrap CI, McNemar)"
+    )
     args = parser.parse_args()
 
     config_names = [c.strip() for c in args.configs.split(",") if c.strip()]
     unknown = set(config_names) - set(CONFIGS)
     if unknown:
         parser.error(f"Unknown config(s): {', '.join(sorted(unknown))}")
+    if args.repeats < 1:
+        parser.error("--repeats must be at least 1")
+    if args.baseline_config and args.baseline_config not in config_names:
+        parser.error(f"--baseline-config {args.baseline_config!r} is not among --configs")
     dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
 
     owner_id = f"eval_{uuid.uuid4().hex[:12]}"
     try:
         index_pdfs(owner_id, args.pdf)
-        results = evaluate(owner_id, dataset, config_names, args.k, judge=not args.retrieval_only)
+        runs = evaluate_repeats(
+            owner_id, dataset, config_names, args.k, not args.retrieval_only, args.repeats
+        )
     finally:
         delete_owner_index(owner_id)
 
+    comparison = None
+    if args.baseline_config:
+        runs_by_config = {name: [run[name]["questions"] for run in runs] for name in config_names}
+        comparison = compare_to_baseline(runs_by_config, args.baseline_config)
+    results = merge_repeats(runs)
+
     print_table(results, args.k)
     print_category_table(results, args.k)
+    if args.repeats > 1:
+        print_aggregate_table(results, args.k, args.repeats)
+    if comparison is not None:
+        print_comparison(comparison, args.baseline_config)
 
     out_dir = ROOT / "evaluation" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -418,7 +570,10 @@ def main() -> None:
             "min_vector_similarity": settings.min_vector_similarity,
             "rerank_min_score": settings.rerank_min_score,
         },
+        "repeats": args.repeats,
+        "baseline_config": args.baseline_config,
         "results": results,
+        "comparison": comparison,
     }
     out_file.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nDetailed results: {out_file}")
