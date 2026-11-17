@@ -11,12 +11,13 @@ can later cite exact sources.
 from __future__ import annotations
 
 from bisect import bisect_right
-from typing import List
+from typing import List, Optional
 
 from langchain_core.documents import Document as LCDocument
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import get_settings
+from services.document_meta import DocumentMeta
 from services.pdf_loader import ExtractedPDF
 
 settings = get_settings()
@@ -51,6 +52,7 @@ def chunk_document(
     extracted: ExtractedPDF,
     document_id: str,
     filename: str,
+    meta: Optional[DocumentMeta] = None,
 ) -> List[LCDocument]:
     """
     Convert an ExtractedPDF into a flat list of LangChain Documents,
@@ -61,6 +63,10 @@ def chunk_document(
     chunk. We remember where each page starts in that text; from a
     chunk's start/end offsets we can then tell which page(s) it spans
     (`page` .. `page_end`).
+
+    When `meta` is given (corpus metadata enabled), its fields - title,
+    classification, date, UN symbol... - are copied onto every chunk so
+    retrieval can filter on them and citations can show them.
     """
     page_texts: List[str] = []
     page_numbers: List[int] = []
@@ -81,6 +87,8 @@ def chunk_document(
     splitter = build_text_splitter()
     pieces = splitter.create_documents([full_text])  # add_start_index=True
 
+    extra = meta.chunk_metadata() if meta is not None else {}
+
     def page_at(char_offset: int) -> int:
         return page_numbers[bisect_right(page_starts, char_offset) - 1]
 
@@ -97,6 +105,7 @@ def chunk_document(
             "page": page_at(start),
             "page_end": page_at(end),
             "chunk_index": len(all_chunks),
+            **extra,
         }
         all_chunks.append(LCDocument(page_content=chunk_text, metadata=metadata))
 

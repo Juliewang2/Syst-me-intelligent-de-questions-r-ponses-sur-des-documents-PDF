@@ -5,18 +5,22 @@ Handles PDF upload and ingestion: validates the file, extracts text,
 chunks it, generates embeddings, stores vectors in FAISS, and
 persists document metadata to the database.
 
-Supports uploading multiple PDFs in a single request.
+Supports uploading multiple PDFs in a single request. When
+CORPUS_METADATA_ENABLED is on, an optional `metadata` form field (a JSON
+object, see services/document_meta.py) is applied to every file of the
+request; without it the files are stored as DR_SIMULE.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import shutil
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from config import get_settings
@@ -24,9 +28,9 @@ from database import get_db
 from models import Document, User
 from schemas import DocumentListResponse, DocumentResponse
 from services.auth_service import get_current_user
-from services.chunking_service import chunk_document
-from services.pdf_loader import PDFExtractionError, extract_pdf_text, validate_pdf_header
-from services.vector_store import add_document_chunks
+from services.document_meta import DocumentMeta
+from services.ingestion import apply_meta, index_document
+from services.pdf_loader import validate_pdf_header
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["Upload"])
@@ -65,7 +69,25 @@ def _save_upload_to_disk(file: UploadFile, document_id: str) -> Path:
     return destination
 
 
-def _process_single_pdf(file: UploadFile, db: Session, user: User) -> Document:
+def _parse_metadata(raw: Optional[str]) -> Optional[DocumentMeta]:
+    """The request's metadata, or None when the feature is off. With the
+    feature on, a missing field means defaults (DR_SIMULE)."""
+    if not settings.corpus_metadata_enabled:
+        return None
+    if not raw:
+        return DocumentMeta()
+    try:
+        return DocumentMeta.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid metadata JSON: {exc}",
+        ) from exc
+
+
+def _process_single_pdf(
+    file: UploadFile, db: Session, user: User, meta: Optional[DocumentMeta] = None
+) -> Document:
     _validate_upload(file)
 
     document_id = str(uuid.uuid4())
@@ -87,42 +109,12 @@ def _process_single_pdf(file: UploadFile, db: Session, user: User) -> Document:
         file_size_bytes=stored_path.stat().st_size,
         status="processing",
     )
+    apply_meta(document, meta)
     db.add(document)
     db.commit()
     db.refresh(document)
 
-    try:
-        extracted = extract_pdf_text(stored_path)
-        chunks = chunk_document(extracted, document_id=document.id, filename=file.filename)
-
-        if not chunks:
-            raise PDFExtractionError(
-                "No text chunks could be generated. The PDF may be empty, scanned, or "
-                "contain only images without a text layer."
-            )
-
-        add_document_chunks(user.id, chunks)
-
-        if extracted.ocr_page_count:
-            logger.info("%s: %d page(s) read with OCR", file.filename, extracted.ocr_page_count)
-
-        document.page_count = extracted.page_count
-        document.chunk_count = len(chunks)
-        document.status = "ready"
-        document.error_message = None
-
-    except PDFExtractionError as exc:
-        logger.warning("PDF extraction failed for %s: %s", file.filename, exc)
-        document.status = "failed"
-        document.error_message = str(exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error processing %s", file.filename)
-        document.status = "failed"
-        document.error_message = f"Unexpected error: {exc}"
-
-    db.commit()
-    db.refresh(document)
-    return document
+    return index_document(db, document, stored_path, file.filename, meta)
 
 
 @router.post(
@@ -133,6 +125,11 @@ def _process_single_pdf(file: UploadFile, db: Session, user: User) -> Document:
 )
 def upload_pdfs(
     files: List[UploadFile] = File(..., description="One or more PDF files to ingest"),
+    metadata: Optional[str] = Form(
+        default=None,
+        description="Optional JSON object of document metadata, applied to every file "
+        "(used only when CORPUS_METADATA_ENABLED is on)",
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DocumentListResponse:
@@ -148,11 +145,12 @@ def upload_pdfs(
     """
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided.")
+    meta = _parse_metadata(metadata)
 
     results: List[Document] = []
     for file in files:
         try:
-            document = _process_single_pdf(file, db, user)
+            document = _process_single_pdf(file, db, user, meta)
             results.append(document)
         except HTTPException:
             raise
