@@ -29,14 +29,16 @@ Usage (from the project root, with a real OPENAI_API_KEY in .env):
         --dataset evaluation\\my_questions.json --configs vector,hybrid+rerank
 
 The dataset is a JSON list of
-    {"question": ..., "reference_answer": ... or null, "pages": [..],
-     "category": "term", "document": "file.pdf", "evidence": "quote"}
-where `reference_answer: null` marks a question the PDFs cannot answer,
-`pages` are the PDF page numbers holding the answer, `category`
-(optional) groups questions for a per-category breakdown, `document`
-(optional) names the PDF when evaluating several, and `evidence`
-(optional) is a quote that evaluation/check_dataset.py verifies is on
-those pages.
+    {"question": ..., "reference_answer": ... or null,
+     "evidence_groups": [{"doc": "file.pdf", "pages": [12]}, {"doc": "other.pdf"}],
+     "category": "term", "split": "test", "hop_type": "multi"}
+where `reference_answer: null` marks a question the PDFs cannot answer
+and `evidence_groups` lists every source the answer needs (see
+evaluation/evidence.py; `doc` is a chunk's doc_id or file name, and
+omitted `pages` means the whole file counts). `category`, `split`
+(dev/test) and `hop_type` are optional labels. The older format -
+top-level `pages` plus optional `document` and `evidence` quote - is
+still accepted and read as a single evidence group.
 
 Two datasets ship with the project: dataset.example.json (11 questions,
 used while developing - a "dev set") and dataset_ml_book_test.json (40
@@ -69,6 +71,7 @@ from langchain_openai import ChatOpenAI  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from config import get_settings  # noqa: E402
+from evaluation.evidence import chunk_doc_key, evidence_groups, first_hit_rank, groups_hit  # noqa: E402
 from services.chunking_service import chunk_document  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
 from services.rag_service import answer_from_documents, format_docs_for_context  # noqa: E402
@@ -134,18 +137,13 @@ def _judge_chain():
 
 
 def _is_hit(doc: LCDocument, item: dict) -> bool:
-    if item.get("document") and doc.metadata.get("document_name") != item["document"]:
-        return False
-    first = doc.metadata.get("page")
-    last = doc.metadata.get("page_end", first)
-    return any(first <= p <= last for p in item.get("pages", []))
+    """Does this chunk fall inside any of the item's evidence groups?
+    (Kept for evaluation/threshold_sweep.py.)"""
+    return any(groups_hit([doc], evidence_groups(item)))
 
 
 def _first_hit_rank(docs: List[LCDocument], item: dict) -> Optional[int]:
-    for rank, doc in enumerate(docs, start=1):
-        if _is_hit(doc, item):
-            return rank
-    return None
+    return first_hit_rank(docs, evidence_groups(item))
 
 
 def index_pdfs(owner_id: str, pdfs: List[Path]) -> None:
@@ -170,13 +168,18 @@ def evaluate(owner_id: str, dataset: List[dict], config_names: List[str], k: int
             docs = retrieve(owner_id, item["question"], k=k, **CONFIGS[name])
             latency = time.perf_counter() - started
 
+            groups = evidence_groups(item)
             row = {
                 "question": item["question"],
                 "category": item.get("category"),
+                "split": item.get("split"),
+                "hop_type": item.get("hop_type"),
                 "answerable": answerable,
+                "evidence_groups": groups,
                 "retrieved": [
                     {
                         "document": d.metadata.get("document_name"),
+                        "doc": chunk_doc_key(d),
                         "pages": [d.metadata.get("page"), d.metadata.get("page_end")],
                         "rerank_score": d.metadata.get("rerank_score"),
                         "vector_similarity": d.metadata.get("vector_similarity"),
@@ -185,8 +188,8 @@ def evaluate(owner_id: str, dataset: List[dict], config_names: List[str], k: int
                 ],
                 "retrieval_seconds": round(latency, 2),
             }
-            if answerable and item.get("pages"):
-                rank = _first_hit_rank(docs, item)
+            if answerable and groups:
+                rank = first_hit_rank(docs, groups)
                 row["hit"] = rank is not None
                 row["reciprocal_rank"] = 1.0 / rank if rank else 0.0
 
