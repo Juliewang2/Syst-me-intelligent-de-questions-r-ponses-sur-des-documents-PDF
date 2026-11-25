@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from models import ChatMessage, Conversation
+from services.sensitivity import HISTORY_KEY, sources_sensitivity
 
 settings = get_settings()
 
@@ -89,7 +90,14 @@ def load_chat_history(
         if msg.role == "user":
             history.append(HumanMessage(content=msg.content))
         elif msg.role == "assistant":
-            history.append(AIMessage(content=msg.content))
+            # Marks answers built from restricted sources, so the next
+            # turn keeps this history away from external models
+            # (services/sensitivity.py). response_metadata is never sent
+            # to a provider.
+            sources = json.loads(msg.sources) if msg.sources else []
+            history.append(
+                AIMessage(content=msg.content, response_metadata={HISTORY_KEY: sources_sensitivity(sources)})
+            )
         # system messages are intentionally excluded from the replayed
         # history; the RAG system prompt is injected fresh each turn.
     return history

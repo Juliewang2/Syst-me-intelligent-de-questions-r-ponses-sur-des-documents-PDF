@@ -127,7 +127,9 @@ def summarize_document(
     try:
         extracted = extract_pdf_text(file_path)
         summary_dict = generate_structured_summary(
-            extracted.full_text, max_key_points=payload.max_key_points
+            extracted.full_text,
+            max_key_points=payload.max_key_points,
+            classification=document.classification,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Structured summary generation failed for %s", document_id)

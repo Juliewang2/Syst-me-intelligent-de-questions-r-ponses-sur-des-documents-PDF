@@ -13,7 +13,9 @@ picks the best few.
 
 Here the chat model itself acts as the reranker: it scores every
 candidate 0-10 in one call, returning JSON constrained by a schema
-(structured output). Candidates below `RERANK_MIN_SCORE` are dropped,
+(llm_factory.structured(), whose method depends on the provider). The
+model is chosen for the candidates' sensitivity, so restricted passages
+are scored by a local model. Candidates below `RERANK_MIN_SCORE` are dropped,
 which also acts as a relevance threshold: if nothing is relevant, the
 answer step is told so instead of being fed noise.
 """
@@ -21,15 +23,16 @@ answer step is told so instead of being fed noise.
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document as LCDocument
-from langchain_openai import ChatOpenAI
+from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from config import get_settings
+from services.llm_factory import get_chat_model, record_event, structured
 from services.prompt_templates import RERANK_PROMPT
+from services.sensitivity import context_sensitivity
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -47,16 +50,9 @@ class _RerankResult(BaseModel):
     scores: List[_PassageScore]
 
 
-@lru_cache
-def _get_rerank_chain():
-    llm = ChatOpenAI(
-        model=settings.openai_chat_model,
-        api_key=settings.openai_api_key or None,
-        temperature=0.0,
-        timeout=settings.rerank_timeout_seconds,
-        max_retries=0,
-    )
-    return RERANK_PROMPT | llm.with_structured_output(_RerankResult, method="json_schema", strict=True)
+def _get_rerank_chain(docs: List[LCDocument]) -> Runnable:
+    llm = get_chat_model("rerank", context_sensitivity(docs), temperature=0.0)
+    return RERANK_PROMPT | structured(llm, _RerankResult)
 
 
 def _format_passages(docs: List[LCDocument]) -> str:
@@ -76,11 +72,12 @@ def rerank(question: str, docs: List[LCDocument]) -> Optional[List[Tuple[LCDocum
     if not docs:
         return []
     try:
-        result: _RerankResult = _get_rerank_chain().invoke(
+        result: _RerankResult = _get_rerank_chain(docs).invoke(
             {"question": question, "passages": _format_passages(docs)}
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Reranking failed, keeping retrieval order: %s", exc)
+        record_event("rerank_fallback", error=type(exc).__name__)
         return None
 
     scores = {s.index: max(0, min(10, s.score)) for s in result.scores}

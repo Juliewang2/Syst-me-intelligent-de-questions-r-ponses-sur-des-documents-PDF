@@ -1,28 +1,20 @@
 """
 services/embedding_service.py
 -------------------------------
-Thin wrapper around LangChain's `OpenAIEmbeddings`, exposed as a
-cached singleton so the embedding client (and its connection pool)
-is reused across requests instead of being recreated on every call.
+The embedding model used to index and search chunks. Which model that
+is depends on the deployment mode (OpenAI, Mistral, or local bge-m3 via
+Ollama in hybrid and sovereign modes) and is decided by
+services/llm_factory.py; this module keeps the import path the vector
+store has always used.
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
+from langchain_core.embeddings import Embeddings
 
-from langchain_openai import OpenAIEmbeddings
-
-from config import get_settings
-
-settings = get_settings()
+from services import llm_factory
 
 
-@lru_cache
-def get_embeddings() -> OpenAIEmbeddings:
-    """Return a cached OpenAIEmbeddings client configured from settings."""
-    return OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key or None,
-        timeout=settings.openai_timeout_seconds,
-        max_retries=settings.openai_max_retries,
-    )
+def get_embeddings() -> Embeddings:
+    """The current deployment mode's (cached) embedding client."""
+    return llm_factory.get_embeddings()

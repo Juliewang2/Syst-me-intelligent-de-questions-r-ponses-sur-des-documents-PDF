@@ -10,12 +10,18 @@ Pipeline:
         -> retriever.invoke(question)                  (FAISS similarity search)
         -> format retrieved chunks into a context block
         -> RAG_PROMPT.format(context, chat_history, question)
-        -> ChatOpenAI (streaming or non-streaming)
+        -> chat model from llm_factory (streaming or non-streaming)
         -> answer text
 
-Also demonstrates the raw OpenAI Python SDK's Responses API with
-structured (JSON-schema) output for document summarization — a
-feature that sits alongside, rather than inside, the LangChain chain.
+Every model is obtained from services/llm_factory.py with the
+sensitivity of what it will read (services/sensitivity.py): the
+condensation step sees the chat history, generation sees the history
+and the retrieved chunks. Restricted input is answered by a local model.
+
+Document summaries use the raw OpenAI SDK's Responses API with
+structured (JSON-schema) output in openai mode, as before; in the other
+modes (or for a restricted document) they go through
+llm_factory.structured() instead.
 """
 
 from __future__ import annotations
@@ -27,13 +33,14 @@ from functools import lru_cache
 from typing import AsyncIterator, List, Optional
 
 from langchain_core.documents import Document as LCDocument
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda
-from langchain_openai import ChatOpenAI
 from openai import OpenAI
+from pydantic import BaseModel
 
 from config import get_settings
+from services.llm_factory import get_chat_model, structured
 from services.prompt_templates import (
     CONDENSE_QUESTION_PROMPT,
     RAG_PROMPT,
@@ -41,25 +48,20 @@ from services.prompt_templates import (
     build_summary_user_prompt,
 )
 from services.retriever import get_retriever
+from services.sensitivity import (
+    PUBLIC,
+    context_sensitivity,
+    document_sensitivity,
+    history_sensitivity,
+    stricter,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-# ---------------------------------------------------------------------------
-# LLM factories
-# ---------------------------------------------------------------------------
-
-@lru_cache
-def _get_chat_llm(streaming: bool, temperature: float = 0.2) -> ChatOpenAI:
-    return ChatOpenAI(
-        model=settings.openai_chat_model,
-        api_key=settings.openai_api_key or None,
-        temperature=temperature,
-        streaming=streaming,
-        timeout=settings.openai_timeout_seconds,
-        max_retries=settings.openai_max_retries,
-    )
+# Generation temperature (unchanged from the original single-model setup).
+_ANSWER_TEMPERATURE = 0.2
 
 
 @lru_cache
@@ -137,7 +139,7 @@ def _condense_question(question: str, chat_history: List[BaseMessage]) -> str:
     if not chat_history:
         return question
 
-    llm = _get_chat_llm(streaming=False, temperature=0.0)
+    llm = get_chat_model("rewrite", history_sensitivity(chat_history), temperature=0.0)
     chain = CONDENSE_QUESTION_PROMPT | llm | StrOutputParser()
     try:
         rewritten = chain.invoke({"question": question, "chat_history": chat_history})
@@ -178,11 +180,18 @@ def retrieve_context(
 # Answer generation (non-streaming)
 # ---------------------------------------------------------------------------
 
+def _answer_model(chat_history: List[BaseMessage], documents: List[LCDocument], streaming: bool):
+    """The generation model, chosen for the most restricted of the
+    history and the retrieved chunks."""
+    sensitivity = stricter(context_sensitivity(documents), history_sensitivity(chat_history))
+    return get_chat_model("generate", sensitivity, streaming=streaming, temperature=_ANSWER_TEMPERATURE)
+
+
 def answer_from_documents(
     question: str, chat_history: List[BaseMessage], documents: List[LCDocument]
 ) -> str:
     """The "generation" half of RAG: answer from already-retrieved chunks."""
-    llm = _get_chat_llm(streaming=False)
+    llm = _answer_model(chat_history, documents, streaming=False)
     chain = RAG_PROMPT | llm | StrOutputParser()
     return chain.invoke(
         {
@@ -231,7 +240,7 @@ async def generate_answer_stream(
     yield {"type": "sources", "sources": sources}
 
     context = format_docs_for_context(retrieval.documents)
-    llm = _get_chat_llm(streaming=True)
+    llm = _answer_model(chat_history, retrieval.documents, streaming=True)
     chain = RAG_PROMPT | llm | StrOutputParser()
 
     full_answer_parts: List[str] = []
@@ -292,18 +301,32 @@ SUMMARY_JSON_SCHEMA = {
 }
 
 
-def generate_structured_summary(document_text: str, max_key_points: int = 5) -> dict:
-    """
-    Uses the OpenAI Responses API's structured output (JSON Schema)
-    feature to produce a strongly-typed summary of a document. This
-    calls the OpenAI SDK directly (rather than going through
-    LangChain) to showcase the native Responses API.
-    """
-    client = _get_openai_client()
+class DocumentSummary(BaseModel):
+    """Same fields as SUMMARY_JSON_SCHEMA, for llm_factory.structured()."""
 
-    # The Responses API caps input size generously, but we defensively
-    # truncate very large documents to keep latency/cost predictable.
+    title: str
+    overview: str
+    key_points: List[str]
+    document_type: str
+    estimated_reading_time_minutes: int
+
+
+def generate_structured_summary(
+    document_text: str, max_key_points: int = 5, classification: Optional[str] = None
+) -> dict:
+    """
+    A strongly-typed summary of a document. In openai mode, for a
+    document that may go to OpenAI, this calls the OpenAI Responses
+    API's structured output (JSON Schema) directly, as before; otherwise
+    it uses the factory's model for the document's sensitivity.
+    """
+    # Very large documents are truncated to keep latency/cost predictable.
     truncated_text = document_text[:60_000]
+    sensitivity = document_sensitivity(classification)
+    if settings.deployment_mode != "openai" or sensitivity != PUBLIC:
+        return _summary_via_factory(truncated_text, max_key_points, sensitivity)
+
+    client = _get_openai_client()
 
     response = client.responses.create(
         model=settings.openai_chat_model,
@@ -324,3 +347,14 @@ def generate_structured_summary(document_text: str, max_key_points: int = 5) -> 
     import json
 
     return json.loads(response.output_text)
+
+
+def _summary_via_factory(text: str, max_key_points: int, sensitivity: str) -> dict:
+    llm = get_chat_model("generate", sensitivity, temperature=0.0)
+    summary: DocumentSummary = structured(llm, DocumentSummary).invoke(
+        [
+            SystemMessage(content=SUMMARY_SYSTEM_PROMPT),
+            HumanMessage(content=build_summary_user_prompt(text, max_key_points)),
+        ]
+    )
+    return summary.model_dump()
