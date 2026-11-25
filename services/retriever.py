@@ -10,9 +10,12 @@ question. Given a question it:
                         search is enabled.
   3. Fusion           - merges the two ranked lists with Reciprocal Rank
                         Fusion (RRF).
-  4. Rerank           - the chat model scores each candidate 0-10 and
-                        those below RERANK_MIN_SCORE are dropped.
-  5. Top-k            - the best `k` chunks go into the prompt.
+  4. Rerank           - the chat model scores each candidate 0-10.
+  5. Threshold, top-k - candidates below RERANK_MIN_SCORE are dropped and
+                        the best `k` chunks go into the prompt.
+
+`retrieve_scored` runs steps 1-4 and returns every candidate with its
+score (used by services/corrective_retriever.py); `retrieve` adds step 5.
 
 Every step is switchable (settings, or per-call overrides used by the
 evaluation script to compare configurations). Optional metadata
@@ -66,22 +69,24 @@ def _with_scores(doc: LCDocument, **scores) -> LCDocument:
     return LCDocument(page_content=doc.page_content, metadata={**doc.metadata, **scores})
 
 
-def retrieve(
+def retrieve_scored(
     owner_id: str,
     query: str,
     document_id: Optional[str] = None,
-    k: Optional[int] = None,
+    filters: Optional[dict] = None,
     hybrid: Optional[bool] = None,
     use_rerank: Optional[bool] = None,
-    filters: Optional[dict] = None,
+    n_candidates: Optional[int] = None,
 ) -> List[LCDocument]:
-    """Run the full retrieval pipeline and return up to k chunks, best
-    first. `hybrid` / `use_rerank` override the settings when given;
-    `filters` restricts both searches to matching chunks."""
-    k = k or settings.retriever_k
+    """Steps 1-4 without any cut: every fused candidate (at most
+    n_candidates), best first. When reranked, each carries
+    metadata["rerank_score"] (0-10); when reranking is off or failed the
+    key is absent (metadata.get gives None) and the order is the fused
+    one. Corrective retrieval reads these scores to judge how good the
+    retrieval was."""
     hybrid = settings.hybrid_search_enabled if hybrid is None else hybrid
     use_rerank = settings.rerank_enabled if use_rerank is None else use_rerank
-    n_candidates = max(settings.retrieval_candidates, k)
+    n_candidates = n_candidates or settings.retrieval_candidates
 
     # 1. Semantic search, with a similarity floor.
     vector_hits = [
@@ -111,14 +116,37 @@ def retrieve(
     if use_rerank and candidates:
         scored = rerank(query, candidates)
         if scored is not None:
-            candidates = [
-                _with_scores(doc, rerank_score=score)
-                for doc, score in scored
-                if score >= settings.rerank_min_score
-            ]
+            return [_with_scores(doc, rerank_score=score) for doc, score in scored]
+    # Unscored: no rerank_score key, exactly as before (.get() gives None).
+    return candidates
 
-    # 5. Top-k.
-    return candidates[:k]
+
+def above_threshold(docs: List[LCDocument], min_score: Optional[int] = None) -> List[LCDocument]:
+    """Drop chunks whose rerank score is below the bar; unscored chunks
+    (rerank off or failed) are all kept, in their order."""
+    bar = settings.rerank_min_score if min_score is None else min_score
+    return [d for d in docs if d.metadata.get("rerank_score") is None or d.metadata["rerank_score"] >= bar]
+
+
+def retrieve(
+    owner_id: str,
+    query: str,
+    document_id: Optional[str] = None,
+    k: Optional[int] = None,
+    hybrid: Optional[bool] = None,
+    use_rerank: Optional[bool] = None,
+    filters: Optional[dict] = None,
+) -> List[LCDocument]:
+    """Run the full retrieval pipeline and return up to k chunks, best
+    first. `hybrid` / `use_rerank` override the settings when given;
+    `filters` restricts both searches to matching chunks."""
+    k = k or settings.retriever_k
+    candidates = retrieve_scored(
+        owner_id, query, document_id=document_id, filters=filters, hybrid=hybrid,
+        use_rerank=use_rerank, n_candidates=max(settings.retrieval_candidates, k),
+    )
+    # 5. Relevance threshold, then top-k.
+    return above_threshold(candidates)[:k]
 
 
 class PDFChatRetriever(BaseRetriever):
