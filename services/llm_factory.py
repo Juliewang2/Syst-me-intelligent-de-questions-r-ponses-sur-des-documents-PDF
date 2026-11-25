@@ -78,7 +78,9 @@ class StructuredOutputError(Exception):
 # Call log
 # ---------------------------------------------------------------------------
 
-_call_log: ContextVar[Optional[List[dict]]] = ContextVar("llm_call_log", default=None)
+# Active logs, outermost first: nested blocks (corrective retrieval
+# counting its own calls inside an evaluation run) all see each event.
+_call_logs: ContextVar[Tuple[List[dict], ...]] = ContextVar("llm_call_logs", default=())
 
 
 @contextmanager
@@ -87,17 +89,16 @@ def llm_call_log() -> Iterator[List[dict]]:
     The list is shared with worker threads started from it
     (asyncio.to_thread copies the context, not the list)."""
     records: List[dict] = []
-    token = _call_log.set(records)
+    token = _call_logs.set((*_call_logs.get(), records))
     try:
         yield records
     finally:
-        _call_log.reset(token)
+        _call_logs.reset(token)
 
 
 def record_event(event: str, **fields: Any) -> None:
-    """Append an entry to the active call log (no-op outside one)."""
-    records = _call_log.get()
-    if records is not None:
+    """Append an entry to every active call log (no-op outside one)."""
+    for records in _call_logs.get():
         records.append({"event": event, **fields})
 
 

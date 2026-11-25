@@ -94,6 +94,15 @@ def test_call_log_records_provider_and_sensitivity(monkeypatch):
     assert len(calls) == 2
 
 
+def test_nested_call_logs_both_see_events():
+    with llm_call_log() as outer:
+        get_chat_model("generate")
+        with llm_call_log() as inner:
+            get_chat_model("rerank")
+    assert [c["role"] for c in outer] == ["generate", "rerank"]
+    assert [c["role"] for c in inner] == ["rerank"]
+
+
 @pytest.mark.parametrize(
     "mode, provider", [("openai", "openai"), ("mistral", "mistral"), ("hybride", "ollama"), ("souverain", "ollama")]
 )

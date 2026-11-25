@@ -11,7 +11,7 @@ across the whole application.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -109,6 +109,17 @@ class Settings(BaseSettings):
     # Reranking is optional (it falls back to the fused order), so it gets a
     # short timeout and no retries rather than holding up the answer.
     rerank_timeout_seconds: float = Field(default=20.0, gt=0)
+
+    # --- Corrective retrieval (services/corrective_retriever.py) ---
+    # When the best rerank score of a search is low, search again with
+    # rewritten queries (expanded jargon, translations). Off = unchanged.
+    corrective_retrieval_enabled: bool = Field(default=False)
+    # Best score >= upper: results are good. Below lower: nothing relevant.
+    # In between: keep what passed and add results of the rewrites.
+    corrective_upper_threshold: int = Field(default=7, ge=0, le=10)
+    # Empty = RERANK_MIN_SCORE.
+    corrective_lower_threshold: Optional[int] = Field(default=None, ge=0, le=10)
+    corrective_max_retries: int = Field(default=1, ge=0, le=3)
 
     # --- Diplomatic corpus ---
     # Read document metadata (sidecar .json / upload field) and copy it onto
