@@ -134,9 +134,9 @@
       "language": "en",
       "date": "2025-12-15",
       "un_symbol": "A/RES/80/138",
-      "url": "https://docs.un.org/en/A/RES/80/138",
+      "url": "https://documents.un.org/api/symbol/access?s=A/RES/80/138&l=en&t=pdf",
       "format": "pdf",
-      "status": "to_check",
+      "status": "verified",
       "note": "Vote 181-1-0 reported by a third-party site (un-project.org); confirm on the UN Digital Library voting record."
     },
     {
