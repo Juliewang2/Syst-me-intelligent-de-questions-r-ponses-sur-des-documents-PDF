@@ -22,6 +22,13 @@ langchain-community==0.3.14
 langchain-openai==0.2.14
 langchain-text-splitters==0.3.5
 langchain-core==0.3.29
+# Other model providers for the deployment modes (services/llm_factory.py).
+# Pinned to the 0.2 line: 0.3+/1.x require langchain-core 1.x.
+# langchain-mistralai 0.2.4 has no json_schema structured output
+# (function_calling is used instead); OllamaEmbeddings covers local
+# embeddings (bge-m3) without torch / sentence-transformers.
+langchain-mistralai==0.2.4
+langchain-ollama==0.2.2
 
 # Vector store
 faiss-cpu
