@@ -26,8 +26,25 @@ For every question and every retrieval configuration it records:
     refusal      - for questions the documents cannot answer: did the
                    system say so instead of making something up?
 
+  Routing (services/llm_factory.py call log)
+    llm_requests - every model request: role, provider, model,
+                   sensitivity, and whether it was rerouted to the local
+                   model because the context was restricted
+    rerouted_rate          - share of questions with a rerouted request
+    structured_failure_rate - structured-output calls that failed after
+                              their retry, over all structured calls
+    rerank_fallback_rate   - questions whose rerank failed and kept the
+                             fused order, over questions that reranked
+
 These mirror the core metrics of frameworks such as RAGAS, implemented
 directly so every number is easy to trace.
+
+--deployment openai|mistral|souverain|hybride runs the system under test
+in that mode (the judge is unaffected). --allow-external-dr lets
+external providers receive restricted text for the run - only for
+measuring what the restriction costs; the report flags it. A PDF with a
+same-named .json sidecar is indexed with that metadata (doc_id,
+classification...), as scripts/ingest_corpus.py would.
 
 Usage (from the project root, with a real OPENAI_API_KEY in .env):
 
@@ -94,7 +111,11 @@ from evaluation.evidence import (  # noqa: E402
 )
 from evaluation.failures import write_failures_report  # noqa: E402
 from evaluation.stats import mcnemar_exact, paired_bootstrap  # noqa: E402
+from services import llm_factory  # noqa: E402
 from services.chunking_service import chunk_document  # noqa: E402
+from services.document_meta import DocumentMeta, load_sidecar, sidecar_path  # noqa: E402
+from services.ingestion import ensure_ingestion_allowed  # noqa: E402
+from services.llm_factory import embedding_choice, llm_call_log, resolve_chat_model  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
 from services.rag_service import answer_from_documents, format_docs_for_context  # noqa: E402
 from services.retriever import retrieve  # noqa: E402
@@ -169,11 +190,19 @@ def _first_hit_rank(docs: List[LCDocument], item: dict) -> Optional[int]:
     return first_hit_rank(docs, evidence_groups(item))
 
 
+def _pdf_meta(pdf: Path) -> Optional[DocumentMeta]:
+    """The PDF's sidecar metadata, or None without a sidecar (then the
+    chunks look exactly as before)."""
+    return load_sidecar(pdf) if sidecar_path(pdf).exists() else None
+
+
 def index_pdfs(owner_id: str, pdfs: List[Path]) -> None:
     for i, pdf in enumerate(pdfs):
         print(f"Indexing {pdf.name} ...", flush=True)
+        meta = _pdf_meta(pdf)
+        ensure_ingestion_allowed(meta)  # same rule as a real import
         extracted = extract_pdf_text(pdf)
-        chunks = chunk_document(extracted, document_id=f"eval-doc-{i}", filename=pdf.name)
+        chunks = chunk_document(extracted, document_id=f"eval-doc-{i}", filename=pdf.name, meta=meta)
         add_document_chunks(owner_id, chunks)
         print(f"  {extracted.page_count} pages ({extracted.ocr_page_count} via OCR), {len(chunks)} chunks")
 
@@ -224,11 +253,25 @@ def _judge(judge_chain, item: dict, docs: List[LCDocument], answer: str) -> Opti
     }
 
 
+def routing_summary(events: List[dict]) -> dict:
+    """Per-question routing fields from the llm_factory call log."""
+    requests = [{k: v for k, v in e.items() if k != "event"} for e in events if e["event"] == "model"]
+    return {
+        "llm_requests": requests,
+        "rerouted": any(r["rerouted"] for r in requests),
+        "structured_calls": sum(e["event"] == "structured_call" for e in events),
+        "structured_failures": sum(e["event"] == "structured_failure" for e in events),
+        "reranked": any(r["role"] == "rerank" for r in requests),
+        "rerank_fallback": any(e["event"] == "rerank_fallback" for e in events),
+    }
+
+
 def _run_system(owner_id: str, item: dict, config: dict, k: int, generate: bool) -> tuple:
     """Retrieval (+ answer) for one question, with the model calls they
-    make recorded. Returns (docs, answer or None, seconds, usage calls)."""
+    make recorded. Returns (docs, answer or None, seconds, usage calls,
+    routing fields)."""
     answer = None
-    with track_usage() as usage:
+    with track_usage() as usage, llm_call_log() as events:
         started = time.perf_counter()
         docs = retrieve(owner_id, item["question"], k=k, **config)
         latency = time.perf_counter() - started
@@ -237,14 +280,16 @@ def _run_system(owner_id: str, item: dict, config: dict, k: int, generate: bool)
                 answer = answer_from_documents(item["question"], [], docs)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Answer generation failed, question left unscored: %s", exc)
-    return docs, answer, latency, usage.calls
+    return docs, answer, latency, usage.calls, routing_summary(events)
 
 
 def evaluate_question(owner_id: str, item: dict, config: dict, k: int, judge_chain, prices: dict) -> dict:
     """Run and score one question under one retrieval configuration."""
     answerable = item.get("reference_answer") is not None
     groups = evidence_groups(item)
-    docs, answer, latency, calls = _run_system(owner_id, item, config, k, generate=judge_chain is not None)
+    docs, answer, latency, calls, routing = _run_system(
+        owner_id, item, config, k, generate=judge_chain is not None
+    )
 
     row = {
         "question": item["question"],
@@ -256,6 +301,7 @@ def evaluate_question(owner_id: str, item: dict, config: dict, k: int, judge_cha
         "retrieved": _retrieved_summary(docs),
         "retrieval_seconds": round(latency, 2),
         **usage_summary(calls, prices),
+        **routing,
     }
     if answerable and groups:
         row.update(_retrieval_scores(docs, groups))
@@ -327,6 +373,24 @@ def summarize(rows: List[dict]) -> dict:
             if (costs := [r["cost_usd"] for r in rows if r.get("cost_usd") is not None])
             else None
         ),
+        **routing_rates(rows),
+    }
+
+
+def routing_rates(rows: List[dict]) -> dict:
+    """rerouted / structured-failure / rerank-fallback rates (None when
+    nothing was measured, e.g. no structured call at all)."""
+    def ratio(numerator: float, denominator: float) -> Optional[float]:
+        return round(numerator / denominator, 3) if denominator else None
+
+    routed = [r for r in rows if "llm_requests" in r]
+    reranked = [r for r in routed if r["reranked"]]
+    return {
+        "rerouted_rate": ratio(sum(r["rerouted"] for r in routed), len(routed)),
+        "structured_failure_rate": ratio(
+            sum(r["structured_failures"] for r in routed), sum(r["structured_calls"] for r in routed)
+        ),
+        "rerank_fallback_rate": ratio(sum(r["rerank_fallback"] for r in reranked), len(reranked)),
     }
 
 
@@ -347,6 +411,17 @@ def print_table(results: dict, k: int) -> None:
         cells = "".join(
             f"{'-' if summary[key] is None else summary[key]:>11}" for _, key in columns
         )
+        print(f"{name:<15}{cells}")
+
+
+def print_routing_table(results: dict) -> None:
+    keys = [("rerouted", "rerouted_rate"), ("struct_fail", "structured_failure_rate"),
+            ("rerank_fallback", "rerank_fallback_rate")]
+    header = f"{'config':<15}" + "".join(f"{title:>17}" for title, _ in keys)
+    print(f"\nRouting ({settings.deployment_mode} mode):\n{header}\n" + "-" * len(header))
+    for name, result in results.items():
+        summary = result["summary"]
+        cells = "".join(f"{'-' if summary[key] is None else summary[key]:>17}" for _, key in keys)
         print(f"{name:<15}{cells}")
 
 
@@ -500,6 +575,37 @@ def print_comparison(comparison: dict, baseline: str) -> None:
             print(f"    hit McNemar     b01={m['b01']} b10={m['b10']} p={m['p_value']:.4f}")
 
 
+EXTERNAL_DR_WARNING = (
+    "!!! --allow-external-dr: restricted (DR_SIMULE) text MAY BE SENT TO EXTERNAL PROVIDERS in this run. "
+    "Results do not reflect the production routing. !!!"
+)
+
+
+def apply_deployment(mode: str, allow_external_dr: bool) -> None:
+    """Run the system under test in `mode`; with allow_external_dr every
+    provider may receive restricted text (nothing is rerouted)."""
+    settings.deployment_mode = mode
+    if allow_external_dr:
+        settings.dr_allowed_providers = list(llm_factory.PROVIDERS)
+        print(f"\n{EXTERNAL_DR_WARNING}\n", flush=True)
+    llm_factory.reset_cache()
+
+
+def deployment_report(allow_external_dr: bool) -> dict:
+    generate = resolve_chat_model("generate")
+    rerank = resolve_chat_model("rerank")
+    embedding_provider, embedding_model = embedding_choice()
+    return {
+        "deployment_mode": settings.deployment_mode,
+        "external_dr_allowed": allow_external_dr,
+        "dr_allowed_providers": settings.dr_allowed_providers,
+        "generate_model": f"{generate.provider}/{generate.model}",
+        "rerank_model": f"{rerank.provider}/{rerank.model}",
+        "local_model": f"ollama/{settings.local_chat_model}",
+        "embedding": f"{embedding_provider}/{embedding_model}",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate PDF Chat retrieval and answer quality.")
     parser.add_argument("--pdf", action="append", required=True, type=Path, help="PDF to index (repeatable)")
@@ -519,7 +625,19 @@ def main() -> None:
     parser.add_argument(
         "--baseline-config", help="Compare every other config to this one (bootstrap CI, McNemar)"
     )
+    parser.add_argument(
+        "--deployment",
+        choices=["openai", "mistral", "souverain", "hybride"],
+        default=settings.deployment_mode,
+        help="Deployment mode of the system under test (default: DEPLOYMENT_MODE)",
+    )
+    parser.add_argument(
+        "--allow-external-dr",
+        action="store_true",
+        help="Let external providers receive restricted (DR_SIMULE) text for this run (flagged in the report)",
+    )
     args = parser.parse_args()
+    apply_deployment(args.deployment, args.allow_external_dr)
 
     config_names = [c.strip() for c in args.configs.split(",") if c.strip()]
     unknown = set(config_names) - set(CONFIGS)
@@ -546,7 +664,10 @@ def main() -> None:
         comparison = compare_to_baseline(runs_by_config, args.baseline_config)
     results = merge_repeats(runs)
 
+    if args.allow_external_dr:
+        print(f"\n{EXTERNAL_DR_WARNING}")
     print_table(results, args.k)
+    print_routing_table(results)
     print_category_table(results, args.k)
     if args.repeats > 1:
         print_aggregate_table(results, args.k, args.repeats)
@@ -562,6 +683,8 @@ def main() -> None:
         "pdfs": [p.name for p in args.pdf],
         "dataset": args.dataset.name,
         "k": args.k,
+        **({"WARNING": EXTERNAL_DR_WARNING} if args.allow_external_dr else {}),
+        "deployment": deployment_report(args.allow_external_dr),
         "settings": {
             "chat_model": settings.openai_chat_model,
             "judge_model": _judge_model(),

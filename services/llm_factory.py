@@ -304,6 +304,7 @@ def structured(llm: BaseChatModel, schema: Type[BaseModel]) -> Runnable:
     provider = provider_of(llm)
 
     def invoke(value: Any, config: Optional[RunnableConfig] = None) -> BaseModel:
+        record_event("structured_call", provider=provider, schema=schema.__name__)
         last_error: Optional[Exception] = None
         for _ in range(2):
             try:

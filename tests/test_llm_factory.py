@@ -183,7 +183,8 @@ def test_structured_raises_after_second_failure(monkeypatch):
     with llm_call_log() as calls:
         with pytest.raises(StructuredOutputError):
             structured(llm, Answer).invoke("q")
-    assert calls == [{"event": "structured_failure", "provider": "mistral", "schema": "Answer"}]
+    assert [c["event"] for c in calls] == ["structured_call", "structured_failure"]
+    assert calls[-1] == {"event": "structured_failure", "provider": "mistral", "schema": "Answer"}
 
 
 def test_structured_does_not_retry_network_errors(monkeypatch):
