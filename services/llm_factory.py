@@ -150,11 +150,12 @@ def resolve_chat_model(role: str, sensitivity: str = "PUBLIC") -> ModelChoice:
 # ---------------------------------------------------------------------------
 
 def _timeout(provider: str, role: str) -> Tuple[float, int]:
-    """(timeout seconds, retries). Reranking is optional, so on hosted
-    providers it keeps its short timeout and no retries, as before."""
+    """(timeout seconds, retries). Reranking and query rewriting are
+    optional steps (on failure: fused order, original question), so on
+    hosted providers they get the short rerank timeout and no retries."""
     if provider == LOCAL_PROVIDER:
         return settings.local_timeout_seconds, 0
-    if role == "rerank":
+    if role in ("rerank", "rewrite"):
         return settings.rerank_timeout_seconds, 0
     return settings.openai_timeout_seconds, settings.openai_max_retries
 
