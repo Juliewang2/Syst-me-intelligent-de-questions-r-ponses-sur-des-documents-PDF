@@ -92,6 +92,10 @@ def _process_single_pdf(
     file: UploadFile, db: Session, user: User, meta: Optional[DocumentMeta] = None
 ) -> Document:
     _validate_upload(file)
+    try:
+        ensure_ingestion_allowed(meta)
+    except ClassificationNotAllowed as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     document_id = str(uuid.uuid4())
     stored_path = _save_upload_to_disk(file, document_id)
@@ -149,10 +153,6 @@ def upload_pdfs(
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided.")
     meta = _parse_metadata(metadata)
-    try:
-        ensure_ingestion_allowed(meta)
-    except ClassificationNotAllowed as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     results: List[Document] = []
     for file in files:
