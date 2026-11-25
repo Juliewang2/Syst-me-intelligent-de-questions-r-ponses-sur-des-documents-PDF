@@ -16,6 +16,11 @@ ready) is skipped, so fixing one sidecar and re-running doesn't duplicate
 everything else. Two *versions* of a document must therefore have
 different doc_ids (link them with `supersedes`).
 
+A DR_SIMULE file is refused (FAIL line) when the deployment mode's
+embedding provider may not receive restricted text - in openai or
+mistral mode, import internal documents with DEPLOYMENT_MODE=hybride or
+souverain.
+
 Requires CORPUS_METADATA_ENABLED=true (in .env), since without it the
 metadata would not be stored.
 
@@ -42,7 +47,8 @@ from config import get_settings  # noqa: E402
 from database import db_session, init_db  # noqa: E402
 from models import Document, User  # noqa: E402
 from services.document_meta import DocumentMeta, load_sidecar  # noqa: E402
-from services.ingestion import apply_meta, index_document  # noqa: E402
+from services.ingestion import apply_meta, ensure_ingestion_allowed, index_document  # noqa: E402
+from services.sensitivity import ClassificationNotAllowed  # noqa: E402
 
 settings = get_settings()
 
@@ -90,6 +96,10 @@ def ingest_one(db: Session, owner_id: str, pdf: Path) -> str:
         meta = load_sidecar(pdf)
     except (ValidationError, ValueError) as exc:
         return f"FAIL  {pdf.name}: invalid sidecar - {exc}"
+    try:
+        ensure_ingestion_allowed(meta)
+    except ClassificationNotAllowed as exc:
+        return f"FAIL  {pdf.name}: {exc}"
     if already_ingested(db, owner_id, meta.doc_id):
         return f"SKIP  {pdf.name}: doc_id {meta.doc_id!r} already imported"
     document = ingest_pdf(db, owner_id, pdf, meta)

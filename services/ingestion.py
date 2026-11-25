@@ -9,6 +9,12 @@ Both ways documents arrive - the upload endpoint and the
 scripts/ingest_corpus.py batch import - go through `index_document`, so
 a corpus file ends up stored exactly like an uploaded one, metadata
 included.
+
+A restricted (DR_SIMULE) document is refused when the deployment mode's
+embedding provider may not receive restricted text (openai and mistral
+modes by default): indexing sends every chunk to that provider. Callers
+check early with `ensure_ingestion_allowed` to give a clear error;
+`index_document` checks again so no path can skip the rule.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from models import Document
 from services.chunking_service import chunk_document
 from services.document_meta import META_FIELDS, DocumentMeta
 from services.pdf_loader import PDFExtractionError, extract_pdf_text
+from services.sensitivity import ClassificationNotAllowed, check_ingestion_allowed
 from services.vector_store import add_document_chunks
 
 logger = logging.getLogger(__name__)
@@ -36,6 +43,14 @@ def apply_meta(document: Document, meta: Optional[DocumentMeta]) -> None:
         setattr(document, field, getattr(meta, field))
 
 
+def ensure_ingestion_allowed(meta: Optional[DocumentMeta]) -> None:
+    """Raise ClassificationNotAllowed if this document may not be indexed
+    in the current mode. Without metadata (feature off) there is no
+    classification to enforce, as before."""
+    if meta is not None:
+        check_ingestion_allowed(meta.classification)
+
+
 def index_document(
     db: Session,
     document: Document,
@@ -47,6 +62,7 @@ def index_document(
     mark the document ready or failed. Never raises for a bad PDF: the
     error is stored on the document instead."""
     try:
+        ensure_ingestion_allowed(meta)
         extracted = extract_pdf_text(pdf_path)
         chunks = chunk_document(extracted, document_id=document.id, filename=display_name, meta=meta)
 
@@ -66,6 +82,10 @@ def index_document(
         document.status = "ready"
         document.error_message = None
 
+    except ClassificationNotAllowed as exc:
+        logger.warning("Refused to index %s: %s", display_name, exc)
+        document.status = "failed"
+        document.error_message = str(exc)
     except PDFExtractionError as exc:
         logger.warning("PDF extraction failed for %s: %s", display_name, exc)
         document.status = "failed"

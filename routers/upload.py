@@ -8,7 +8,9 @@ persists document metadata to the database.
 Supports uploading multiple PDFs in a single request. When
 CORPUS_METADATA_ENABLED is on, an optional `metadata` form field (a JSON
 object, see services/document_meta.py) is applied to every file of the
-request; without it the files are stored as DR_SIMULE.
+request; without it the files are stored as DR_SIMULE. Restricted files
+are refused (422) in modes whose embedding provider may not receive
+them (services/ingestion.py).
 """
 
 from __future__ import annotations
@@ -29,8 +31,9 @@ from models import Document, User
 from schemas import DocumentListResponse, DocumentResponse
 from services.auth_service import get_current_user
 from services.document_meta import DocumentMeta
-from services.ingestion import apply_meta, index_document
+from services.ingestion import apply_meta, ensure_ingestion_allowed, index_document
 from services.pdf_loader import validate_pdf_header
+from services.sensitivity import ClassificationNotAllowed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["Upload"])
@@ -146,6 +149,10 @@ def upload_pdfs(
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided.")
     meta = _parse_metadata(metadata)
+    try:
+        ensure_ingestion_allowed(meta)
+    except ClassificationNotAllowed as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     results: List[Document] = []
     for file in files:
