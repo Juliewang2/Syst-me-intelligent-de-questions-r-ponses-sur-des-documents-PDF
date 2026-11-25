@@ -35,6 +35,12 @@ For every question and every retrieval configuration it records:
                               their retry, over all structured calls
     rerank_fallback_rate   - questions whose rerank failed and kept the
                              fused order, over questions that reranked
+  Corrective retrieval (configs ending in +crag / +crag-noLang)
+    retrieval_trace - action, attempts, rewritten queries, best scores
+    trigger_rate    - share of questions whose first search was not
+                      judged CORRECT
+    rescue_rate     - among triggered questions whose first search missed
+                      the evidence, the share found after rewriting
 
 These mirror the core metrics of frameworks such as RAGAS, implemented
 directly so every number is easy to trace.
@@ -118,6 +124,7 @@ from services.ingestion import ensure_ingestion_allowed  # noqa: E402
 from services.llm_factory import embedding_choice, llm_call_log, resolve_chat_model  # noqa: E402
 from services.pdf_loader import extract_pdf_text  # noqa: E402
 from services.rag_service import answer_from_documents, format_docs_for_context  # noqa: E402
+from services.corrective_retriever import corrective_retrieve  # noqa: E402
 from services.retriever import retrieve  # noqa: E402
 from services.vector_store import add_document_chunks, delete_owner_index  # noqa: E402
 
@@ -128,6 +135,12 @@ CONFIGS = {
     "vector": {"hybrid": False, "use_rerank": False},
     "hybrid": {"hybrid": True, "use_rerank": False},
     "hybrid+rerank": {"hybrid": True, "use_rerank": True},
+    # Corrective retrieval (services/corrective_retriever.py), with and
+    # without translated rewrites - isolates what translation adds.
+    "hybrid+rerank+crag": {"hybrid": True, "use_rerank": True, "crag": True,
+                           "rewrite_modes": ["expand", "translate"]},
+    "hybrid+rerank+crag-noLang": {"hybrid": True, "use_rerank": True, "crag": True,
+                                  "rewrite_modes": ["expand"]},
 }
 
 JUDGE_PROMPT = ChatPromptTemplate.from_messages(
@@ -266,21 +279,36 @@ def routing_summary(events: List[dict]) -> dict:
     }
 
 
+def _retrieve(owner_id: str, item: dict, config: dict, k: int) -> tuple:
+    """(docs, extra row fields) for one configuration. Corrective configs
+    also report their trace and whether the *first* search already hit
+    the evidence (needed for rescue_rate)."""
+    if not config.get("crag"):
+        return retrieve(owner_id, item["question"], k=k, **config), {}
+    result = corrective_retrieve(
+        owner_id, item["question"], k=k, hybrid=config["hybrid"], use_rerank=config["use_rerank"],
+        rewrite_modes=set(config["rewrite_modes"]),
+    )
+    groups = evidence_groups(item)
+    initial_hit = first_hit_rank(result.initial_documents, groups) is not None if groups else None
+    return result.documents, {"retrieval_trace": result.trace(), "initial_hit": initial_hit}
+
+
 def _run_system(owner_id: str, item: dict, config: dict, k: int, generate: bool) -> tuple:
     """Retrieval (+ answer) for one question, with the model calls they
     make recorded. Returns (docs, answer or None, seconds, usage calls,
-    routing fields)."""
+    extra row fields: routing, and the trace for corrective configs)."""
     answer = None
     with track_usage() as usage, llm_call_log() as events:
         started = time.perf_counter()
-        docs = retrieve(owner_id, item["question"], k=k, **config)
+        docs, extra = _retrieve(owner_id, item, config, k)
         latency = time.perf_counter() - started
         if generate:
             try:
                 answer = answer_from_documents(item["question"], [], docs)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Answer generation failed, question left unscored: %s", exc)
-    return docs, answer, latency, usage.calls, routing_summary(events)
+    return docs, answer, latency, usage.calls, {**routing_summary(events), **extra}
 
 
 def evaluate_question(owner_id: str, item: dict, config: dict, k: int, judge_chain, prices: dict) -> dict:
@@ -374,6 +402,21 @@ def summarize(rows: List[dict]) -> dict:
             else None
         ),
         **routing_rates(rows),
+        **corrective_rates(rows),
+    }
+
+
+def corrective_rates(rows: List[dict]) -> dict:
+    """trigger_rate: share of questions whose first search was not judged
+    CORRECT (a retry was considered). rescue_rate: among triggered
+    answerable questions whose first search missed the evidence, the share
+    the corrective search then found. None outside corrective configs."""
+    traced = [r for r in rows if r.get("retrieval_trace")]
+    triggered = [r for r in traced if r["retrieval_trace"]["action"] != "CORRECT"]
+    missed = [r for r in triggered if r.get("initial_hit") is False and "hit" in r]
+    return {
+        "trigger_rate": round(len(triggered) / len(traced), 3) if traced else None,
+        "rescue_rate": round(sum(r["hit"] for r in missed) / len(missed), 3) if missed else None,
     }
 
 
@@ -416,7 +459,8 @@ def print_table(results: dict, k: int) -> None:
 
 def print_routing_table(results: dict) -> None:
     keys = [("rerouted", "rerouted_rate"), ("struct_fail", "structured_failure_rate"),
-            ("rerank_fallback", "rerank_fallback_rate")]
+            ("rerank_fallback", "rerank_fallback_rate"), ("crag_trigger", "trigger_rate"),
+            ("crag_rescue", "rescue_rate")]
     header = f"{'config':<15}" + "".join(f"{title:>17}" for title, _ in keys)
     print(f"\nRouting ({settings.deployment_mode} mode):\n{header}\n" + "-" * len(header))
     for name, result in results.items():
@@ -613,7 +657,10 @@ def main() -> None:
         "--dataset", type=Path, default=ROOT / "evaluation" / "dataset.example.json", help="Questions JSON"
     )
     parser.add_argument(
-        "--configs", default=",".join(CONFIGS), help=f"Comma-separated subset of: {', '.join(CONFIGS)}"
+        "--configs",
+        # Corrective configs cost extra model calls: run them only when asked.
+        default=",".join(name for name, config in CONFIGS.items() if not config.get("crag")),
+        help=f"Comma-separated subset of: {', '.join(CONFIGS)}",
     )
     parser.add_argument("--k", type=int, default=settings.retriever_k, help="Chunks retrieved per question")
     parser.add_argument(
