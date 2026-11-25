@@ -11,7 +11,7 @@ across the whole application.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +43,40 @@ class Settings(BaseSettings):
     # Without a timeout a stalled connection can hang a request indefinitely.
     openai_timeout_seconds: float = Field(default=60.0, gt=0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+
+    # --- Deployment mode / model providers (services/llm_factory.py) ---
+    # openai    : every model call and embedding goes to OpenAI (as before).
+    # mistral   : every model call and embedding goes to Mistral.
+    # souverain : everything runs locally through Ollama.
+    # hybride   : chat models are external (OpenAI by default) for public
+    #             context, local for restricted (DR) context; embeddings
+    #             are always local.
+    deployment_mode: Literal["openai", "mistral", "souverain", "hybride"] = Field(default="openai")
+    # Per-role overrides of the mode's provider ("openai" | "mistral" |
+    # "ollama") and model name. Empty = the mode's default.
+    generate_provider: str = Field(default="")
+    generate_model: str = Field(default="")
+    rerank_provider: str = Field(default="")
+    rerank_model: str = Field(default="")
+    rewrite_provider: str = Field(default="")
+    rewrite_model: str = Field(default="")
+    verify_provider: str = Field(default="")
+    verify_model: str = Field(default="")
+    agent_provider: str = Field(default="")
+    agent_model: str = Field(default="")
+    mistral_api_key: str = Field(default="")
+    mistral_chat_model: str = Field(default="mistral-small-latest")
+    mistral_embedding_model: str = Field(default="mistral-embed")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    local_chat_model: str = Field(default="qwen2.5:7b")
+    local_embedding_model: str = Field(default="bge-m3")
+    # Local models are slower than hosted ones, so they get their own timeout.
+    local_timeout_seconds: float = Field(default=120.0, gt=0)
+    # Providers allowed to receive restricted (DR_SIMULE) text. A model call
+    # whose context is restricted is rerouted to Ollama if its provider is
+    # not listed; a restricted document is refused at import if the
+    # embedding provider is not listed.
+    dr_allowed_providers: List[str] = Field(default_factory=lambda: ["ollama"])
 
     # --- Evaluation ---
     # Model used by evaluation/run_eval.py to grade answers. Empty = use
