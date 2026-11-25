@@ -224,6 +224,34 @@ query ─┬─► 向量检索 top-12 ──► 过滤：余弦相似度 < 0.2 
 
 两处都保证模型输出一定能解析成预期的结构，不需要写正则去"猜"内容。
 
+### 6.7 部署模式与密级路由
+
+所有聊天模型和 embedding 都由 `services/llm_factory.py` 创建，业务代码不再直接 new `ChatOpenAI`。
+
+| `DEPLOYMENT_MODE` | 聊天模型 | embedding |
+|---|---|---|
+| openai（默认） | OpenAI | OpenAI |
+| mistral | Mistral | Mistral |
+| souverain | Ollama（本地） | Ollama（bge-m3） |
+| hybride | 外部（默认 OpenAI），DR 上下文改走 Ollama | 始终本地 |
+
+- **选模型的顺序**：模式默认 → 角色覆盖（`GENERATE_PROVIDER`、`RERANK_MODEL`…）→ 密级规则：
+  上下文是 DR_SIMULE 且该 provider 不在 `DR_ALLOWED_PROVIDERS` 中，就改用 Ollama，调用记录里标 `rerouted`。
+- **密级怎么算**（`services/sensitivity.py`）：任一片段是 DR_SIMULE 即为 DR；没有 classification 的片段也按 DR 处理，
+  只有"openai 模式 + 未开启语料元数据"这一旧配置例外（此时什么都没有分级，行为保持不变）。
+  对话历史也算：以前的回答若引用过 DR 来源，加载历史时会在 `AIMessage.response_metadata` 上打标记，
+  下一轮的追问改写和生成就只交给本地模型。
+- **入库**：embedding 会把每个片段发给 provider，所以 embedding provider 不允许接收 DR 时（openai、mistral 模式），
+  DR 文件在上传、`ingest_corpus.py` 和 `index_document` 三处都会被拒绝。
+- **结构化输出** `structured()`：OpenAI 用 json_schema 严格模式；Mistral 用 function_calling
+  （langchain-mistralai 0.2.4 没有 json_schema，更新的版本要求 langchain-core 1.x）；
+  Ollama 用 json_schema，temperature 0，并把 schema 附在 system 提示末尾。解析失败重试一次，仍失败抛 `StructuredOutputError`。
+- **向量索引按 embedding 模型分目录**：`vector_store/<provider>__<model>/<user>/`，旁边的 `index_meta.json` 记录模型。
+  模型不一致时报错，提示运行 `scripts/reindex.py`；旧布局的索引在 openai 模式下第一次访问时自动迁移。
+- **外泄测试** `tests/test_leak.py`：hybride 模式下用记录输入的假外部模型跑完整流程（含流式、重排和带历史的追问），
+  断言 DR 文本从未出现在外部模型的输入里，同时公开请求确实走了外部模型。
+- 评委（`evaluation/run_eval.py`）不经过工厂，换部署模式不会改变评分标准。
+
 ---
 
 ## 7. 评估体系
