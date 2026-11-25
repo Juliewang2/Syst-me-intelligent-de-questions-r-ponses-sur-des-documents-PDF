@@ -916,6 +916,14 @@ button {
   animation-delay: 0.3s;
 }
 
+/* Corrective retrieval: "searching again..." hint above the answer */
+.retrieval-status {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
 .sources-panel {
   display: flex;
   flex-direction: column;

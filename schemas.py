@@ -156,6 +156,9 @@ class ChatResponse(BaseModel):
     conversation_id: str
     message: ChatMessageResponse
     sources: List[SourceChunk] = Field(default_factory=list)
+    # Corrective retrieval summary (action, attempts, rewritten queries,
+    # best scores); only present when CORRECTIVE_RETRIEVAL_ENABLED.
+    retrieval_trace: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

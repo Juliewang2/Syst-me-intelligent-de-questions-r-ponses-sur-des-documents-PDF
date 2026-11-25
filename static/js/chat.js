@@ -371,6 +371,24 @@
     let accumulated = "";
     let sources = [];
     let firstToken = true;
+    let statusLine = null; // grey "searching again..." hint (corrective retrieval)
+
+    function showStatus(message) {
+      if (!statusLine) {
+        statusLine = document.createElement("div");
+        statusLine.className = "retrieval-status";
+        assistantBubble.parentNode.insertBefore(statusLine, assistantBubble);
+      }
+      statusLine.textContent = message;
+      scrollToBottom();
+    }
+
+    function clearStatus() {
+      if (statusLine) {
+        statusLine.remove();
+        statusLine = null;
+      }
+    }
 
     try {
       const response = await fetch("/api/chat/stream", {
@@ -419,10 +437,13 @@
 
           if (payload.type === "start") {
             state.currentConversationId = payload.conversation_id;
+          } else if (payload.type === "status") {
+            showStatus(payload.message || "");
           } else if (payload.type === "sources") {
             sources = payload.sources || [];
           } else if (payload.type === "token") {
             if (firstToken) {
+              clearStatus();
               assistantBubble.innerHTML = "";
               firstToken = false;
             }
@@ -453,6 +474,7 @@
       assistantBubble.innerHTML = renderMarkdown(`**Error:** ${err.message}`);
       showToast(err.message, "error");
     } finally {
+      clearStatus();
       state.isStreaming = false;
       setSendingState(false);
       scrollToBottom();

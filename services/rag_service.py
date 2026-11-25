@@ -30,7 +30,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import AsyncIterator, List, Optional
+from typing import AsyncIterator, Callable, List, Optional, Union
 
 from langchain_core.documents import Document as LCDocument
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -47,6 +47,7 @@ from services.prompt_templates import (
     SUMMARY_SYSTEM_PROMPT,
     build_summary_user_prompt,
 )
+from services.corrective_retriever import corrective_retrieve
 from services.retriever import get_retriever
 from services.sensitivity import (
     PUBLIC,
@@ -157,6 +158,9 @@ def _condense_question(question: str, chat_history: List[BaseMessage]) -> str:
 class RetrievalResult:
     standalone_question: str
     documents: List[LCDocument]
+    # Corrective retrieval summary (action, attempts, rewrites...); None
+    # when corrective retrieval is off.
+    trace: Optional[dict] = None
 
 
 def retrieve_context(
@@ -167,8 +171,18 @@ def retrieve_context(
     k: Optional[int] = None,
     hybrid: Optional[bool] = None,
     use_rerank: Optional[bool] = None,
+    on_status: Optional[Callable[[dict], None]] = None,
 ) -> RetrievalResult:
+    """Condense the question, then retrieve - through the corrective loop
+    when CORRECTIVE_RETRIEVAL_ENABLED (which calls `on_status` before
+    searching again)."""
     standalone_question = _condense_question(question, chat_history)
+    if settings.corrective_retrieval_enabled:
+        corrected = corrective_retrieve(
+            owner_id, standalone_question, document_id=document_id, k=k,
+            hybrid=hybrid, use_rerank=use_rerank, on_status=on_status,
+        )
+        return RetrievalResult(standalone_question, corrected.documents, corrected.trace())
     retriever = get_retriever(
         owner_id, document_id=document_id, k=k, hybrid=hybrid, use_rerank=use_rerank
     )
@@ -202,6 +216,19 @@ def answer_from_documents(
     )
 
 
+def generate_answer_traced(
+    question: str,
+    chat_history: List[BaseMessage],
+    owner_id: str,
+    document_id: Optional[str] = None,
+) -> tuple[str, List[dict], Optional[dict]]:
+    """Run the full RAG pipeline and return (answer_text, sources,
+    retrieval trace or None)."""
+    retrieval = retrieve_context(question, chat_history, owner_id, document_id=document_id)
+    answer = answer_from_documents(question, chat_history, retrieval.documents)
+    return answer, docs_to_source_dicts(retrieval.documents), retrieval.trace
+
+
 def generate_answer(
     question: str,
     chat_history: List[BaseMessage],
@@ -209,9 +236,44 @@ def generate_answer(
     document_id: Optional[str] = None,
 ) -> tuple[str, List[dict]]:
     """Run the full RAG pipeline and return (answer_text, sources)."""
-    retrieval = retrieve_context(question, chat_history, owner_id, document_id=document_id)
-    answer = answer_from_documents(question, chat_history, retrieval.documents)
-    return answer, docs_to_source_dicts(retrieval.documents)
+    answer, sources, _ = generate_answer_traced(question, chat_history, owner_id, document_id)
+    return answer, sources
+
+
+async def _retrieve_with_status(
+    question: str, chat_history: List[BaseMessage], owner_id: str, document_id: Optional[str]
+) -> AsyncIterator[Union[dict, RetrievalResult]]:
+    """Run retrieval in a worker thread and yield its status events as
+    they happen, then the RetrievalResult.
+
+    The corrective loop runs in that thread and reports "searching
+    again" through on_status. loop.call_soon_threadsafe hands each status
+    to an asyncio.Queue on the event loop - the only thread-safe way in -
+    and this generator waits on whichever comes first, a status or the
+    end of retrieval, so statuses reach the client immediately without
+    polling. The thread's result is also delivered through the loop, so
+    every status scheduled before it is already queued when it ends."""
+    loop = asyncio.get_running_loop()
+    statuses: asyncio.Queue = asyncio.Queue()
+
+    def on_status(status: dict) -> None:
+        loop.call_soon_threadsafe(statuses.put_nowait, status)
+
+    task = asyncio.ensure_future(
+        asyncio.to_thread(
+            retrieve_context, question, chat_history, owner_id, document_id=document_id, on_status=on_status
+        )
+    )
+    while not task.done():
+        next_status = asyncio.ensure_future(statuses.get())
+        done, _ = await asyncio.wait({task, next_status}, return_when=asyncio.FIRST_COMPLETED)
+        if next_status in done:
+            yield {"type": "status", **next_status.result()}
+        else:
+            next_status.cancel()
+    while not statuses.empty():
+        yield {"type": "status", **statuses.get_nowait()}
+    yield task.result()
 
 
 # ---------------------------------------------------------------------------
@@ -225,16 +287,22 @@ async def generate_answer_stream(
     document_id: Optional[str] = None,
 ) -> AsyncIterator[dict]:
     """
-    Async generator that first yields a single 'sources' event, then a
-    sequence of 'token' events as the LLM streams its answer, and
-    finally a 'done' event. Designed to be consumed directly by an SSE
+    Async generator that first yields any 'status' events of corrective
+    retrieval ("searching again..."), then a single 'sources' event, then
+    a sequence of 'token' events as the LLM streams its answer, and
+    finally a 'done' event (with the retrieval trace, None when corrective
+    retrieval is off). Designed to be consumed directly by an SSE
     endpoint.
     """
     # Retrieval makes blocking network calls (embedding, rewrite, rerank);
-    # run it in a worker thread so the event loop keeps serving others.
-    retrieval = await asyncio.to_thread(
-        retrieve_context, question, chat_history, owner_id, document_id=document_id
-    )
+    # it runs in a worker thread so the event loop keeps serving others,
+    # and its "searching again" statuses are streamed before the sources.
+    retrieval: Optional[RetrievalResult] = None
+    async for item in _retrieve_with_status(question, chat_history, owner_id, document_id):
+        if isinstance(item, RetrievalResult):
+            retrieval = item
+        else:
+            yield item
     sources = docs_to_source_dicts(retrieval.documents)
 
     yield {"type": "sources", "sources": sources}
@@ -260,7 +328,12 @@ async def generate_answer_stream(
         yield {"type": "error", "message": f"Generation failed: {exc}"}
         return
 
-    yield {"type": "done", "full_answer": "".join(full_answer_parts), "sources": sources}
+    yield {
+        "type": "done",
+        "full_answer": "".join(full_answer_parts),
+        "sources": sources,
+        "retrieval_trace": retrieval.trace,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,7 @@ from services.conversation_memory import (
     load_chat_history,
     save_message,
 )
-from services.rag_service import generate_answer, generate_answer_stream
+from services.rag_service import generate_answer_stream, generate_answer_traced
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Chat"])
@@ -141,7 +141,7 @@ def chat(
     save_message(db, conversation.id, role="user", content=payload.message)
 
     try:
-        answer_text, sources = generate_answer(
+        answer_text, sources, retrieval_trace = generate_answer_traced(
             payload.message, history, user.id, document_id=payload.document_id
         )
     except Exception as exc:  # noqa: BLE001
@@ -159,6 +159,7 @@ def chat(
         conversation_id=conversation.id,
         message=ChatMessageResponse.model_validate(assistant_message.to_dict()),
         sources=sources,
+        retrieval_trace=retrieval_trace,
     )
 
 
@@ -190,7 +191,10 @@ async def chat_stream(
             async for event in generate_answer_stream(
                 payload.message, history, owner_id, document_id=payload.document_id
             ):
-                if event["type"] == "sources":
+                if event["type"] == "status":
+                    # Corrective retrieval is searching again (sent before sources).
+                    yield _sse_event({"type": "status", "message": event["message"], "action": event["action"]})
+                elif event["type"] == "sources":
                     final_sources = event["sources"]
                     yield _sse_event({"type": "sources", "sources": final_sources})
                 elif event["type"] == "token":
