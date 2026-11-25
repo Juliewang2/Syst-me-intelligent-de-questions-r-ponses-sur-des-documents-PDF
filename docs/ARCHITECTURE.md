@@ -64,7 +64,7 @@
 4. `pdf_loader.extract_pdf_text`：
    - 依次尝试 LangChain `PyPDFLoader` → `pypdf` → `PyPDF2`，任一成功即可；
    - 文字少于 `OCR_MIN_CHARS` 的页面，用 `pypdfium2` 渲染成图片，再用 RapidOCR 识别。
-5. `chunking_service.chunk_document`：跨页切块（见 [5.5](#55-跨页切块)）。
+5. `chunking_service.chunk_document`：跨页切块（见 [5.6](#56-跨页切块)）。
 6. `vector_store.add_document_chunks(owner_id, chunks)`：生成向量，写入该用户的索引并落盘，
    同时更新索引版本号（BM25 缓存据此判断是否需要重建）。
 7. status 更新为 ready；任何一步失败都写为 failed，并记录错误信息。
@@ -143,7 +143,28 @@ query ─┬─► 向量检索 top-12 ──► 过滤：余弦相似度 < 0.2 
 
 如果所有段落都被过滤掉，上下文会明确写成"没有找到相关内容"，模型据此回答"文档中没有"。
 
-### 5.5 跨页切块
+### 5.5 检索纠错循环（`CORRECTIVE_RETRIEVAL_ENABLED`，默认关闭）
+
+受 CRAG 启发：先判断检索结果好不好，不好就再检索一次。CRAG 训练了一个评估器、退回到网页搜索；
+这里用已有的重排分数做评估，退回到"用改写后的查询在同一语料里再搜"——外交问题检索失败，
+多半是说法（缩写、行话）或语言（法语问英文文件）的问题，而不是语料里没有答案。
+
+| 第一轮最高重排分 | 判定 | 处理 |
+|---|---|---|
+| ≥ 7（upper） | CORRECT | 直接用（过滤后取 top-k） |
+| lower ~ upper | AMBIGUOUS | 保留 ≥ lower 的段落，加上每条改写的检索结果，RRF 合并后对原问题重排一次 |
+| < lower（默认 = `RERANK_MIN_SCORE`）或无候选 | INCORRECT | 同上，但不保留第一轮段落；最后仍无合格段落则返回空 |
+| 全部无分（重排关闭或失败） | CORRECT | 没有依据可判断，保持原结果 |
+
+- **改写**（`services/query_rewriter.py`）：先用 `normalize_un_symbol` 规范文号（不调用模型），
+  再一次结构化调用生成"展开缩写的正式说法"和"语料中其他语言的翻译"，最多 3 条；失败返回空，不重试。
+  改写看到的失败段落按密级选模型。
+- **流式状态**：检索在工作线程里，`on_status` 用 `loop.call_soon_threadsafe` 把状态放进 `asyncio.Queue`，
+  生成器同时等待"新状态"和"检索结束"，状态事件在 `sources` 之前发出；前端显示为灰色提示。
+- **评估**：`hybrid+rerank+crag` 与 `hybrid+rerank+crag-noLang`（不翻译），新增 `trigger_rate`、`rescue_rate`；
+  默认不跑这两个配置（会多花模型调用）。
+
+### 5.6 跨页切块
 
 先把各页文字用 `\n` 拼成全文（分页处往往不是段落结束，而是句子的中间），同时记录每页在全文中的起始偏移量。
 `RecursiveCharacterTextSplitter` 开启 `add_start_index=True` 后，会返回每块在全文中的偏移量，
@@ -154,7 +175,7 @@ query ─┬─► 向量检索 top-12 ──► 过滤：余弦相似度 < 0.2 
 - 切分点里补充了中文的 `。？！；`；
 - 设置 `keep_separator="end"`，让句号跟着它所在的句子，而不是跑到下一块的开头。
 
-### 5.6 BM25 的实现细节
+### 5.7 BM25 的实现细节
 
 - **分词**：`jieba.lcut_for_search` 能切分中文，英文单词保持原样；再过滤掉标点等不含字母数字的词。
 - **IDF**：经典 Okapi 的 IDF 是 `log((N−n+0.5)/(n+0.5))`，当一个词出现在一半以上的段落里时，结果是 0 或负数。
