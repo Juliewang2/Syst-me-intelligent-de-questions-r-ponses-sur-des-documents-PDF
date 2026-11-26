@@ -56,6 +56,9 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
+# Personal learning notes (local only)
+learn/
+
 # Diplomatic corpus: downloaded public files and UN vote data (never committed)
 data/corpus/
 data/un_votes.sqlite

@@ -2,6 +2,8 @@
 
 Upload PDFs and ask questions as if you were chatting with ChatGPT. Answers are based **only on the document content**, with citations showing the source document and page number.
 
+**Author:** JulieWang2 · Built on an original baseline by Oleh Datsyk (see [Acknowledgements](#acknowledgements)).
+
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 ![LangChain](https://img.shields.io/badge/LangChain-0.3-1C3C3C)
@@ -250,8 +252,7 @@ pdf-chat/
 │   ├── dataset_ml_book_test.json   40-question test set
 │   └── dataset.example.json        11-question development set
 ├── templates/ static/         Frontend pages, including the login page
-├── tests/                     35 tests (retrieval, authentication, OCR, chunking, and more; offline)
-└── learn/rag_minimal.py       50-line minimal RAG prototype for learning
+└── tests/                     35 tests (retrieval, authentication, OCR, chunking, and more; offline)
 ```
 
 ---
@@ -340,6 +341,12 @@ There are 35 tests, and **no API key is required**: retrieval tests use an offli
 
 ---
 
+## Acknowledgements
+
+This project started from a baseline PDF chat application written by Oleh Datsyk. The hybrid retrieval, evaluation framework, authentication, and the other improvements listed in [Improvements over the Baseline](#improvements-over-the-baseline) were designed and implemented by JulieWang2.
+
+---
+
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE); the original baseline's copyright notice is retained as required by the MIT License.
